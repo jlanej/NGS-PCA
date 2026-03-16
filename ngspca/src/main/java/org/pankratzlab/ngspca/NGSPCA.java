@@ -17,6 +17,7 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.MosdepthUtils.REGION_STRATEGY;
+import org.pankratzlab.ngspca.RandomizedSVD.DISTRIBUTION;
 
 /**
  * A simplified version of BamImport that uses MosDepth output or a custom input matrix to generate
@@ -25,8 +26,8 @@ import org.pankratzlab.ngspca.MosdepthUtils.REGION_STRATEGY;
 public class NGSPCA {
 
   private static void runInputMatrix(String inputMatrixFile, String outputDir, int numPcs,
-                                     int niters, int numOversamples, int sampleAt, int randomSeed,
-                                     boolean overwrite, boolean normMatrix,
+                                     int niters, int numOversamples, int randomSeed,
+                                     boolean overwrite, boolean normMatrix, DISTRIBUTION d,
                                      Logger log) throws InterruptedException, ExecutionException,
                                                  IOException {
     new File(outputDir).mkdirs();
@@ -59,12 +60,13 @@ public class NGSPCA {
       dm = new BlockRealMatrix(regions.size(), samples.size());
       int[] rowIndex = {0};
       //add data to matrix, skipping header and first column of file
-      Stream<String> stream = gz ? FileOps.gzLines(Paths.get(inputMatrixFile), log)
-                                 : Files.lines(Paths.get(inputMatrixFile));
-      stream.skip(1).map(l -> l.split(delim))
-            .forEach(a -> dm.setRow(rowIndex[0]++,
-                                    Utils.convertToDoubleArray(Arrays.copyOfRange(a, 1, a.length),
-                                                               0, log)));
+      try (Stream<String> stream = gz ? FileOps.gzLines(Paths.get(inputMatrixFile), log)
+                                      : Files.lines(Paths.get(inputMatrixFile))) {
+        stream.skip(1).map(l -> l.split(delim))
+              .forEach(a -> dm.setRow(rowIndex[0]++,
+                                      Utils.convertToDoubleArray(Arrays.copyOfRange(a, 1, a.length),
+                                                                 0, log)));
+      }
       if (normMatrix) {
         log.info("Normalizing input matrix");
         NormalizationOperations.foldChangeAndCenterRows(dm, log);
@@ -74,13 +76,13 @@ public class NGSPCA {
       log.info("Loading existing serialized file " + tmpNormDm);
       dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
     }
-    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm);
+    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
 
   }
 
   /**
    * @param input directory or file listing full paths containing MosDepth results, with extension
-   *          {@link MosdepthUtils#MOSDEPHT_BED_EXT}
+   *          {@link MosdepthUtils#MOSDEPTH_BED_EXT}
    * @param outputDir where results will be written
    * @param bedExclude if not null, regions overlapping this bed file will not be included
    * @param regionStrategy how to select markers for PCA
@@ -97,18 +99,18 @@ public class NGSPCA {
   private static void runMosdepth(String input, String outputDir, String bedExclude,
                                   REGION_STRATEGY regionStrategy, int numPcs, int niters,
                                   int numOversamples, int sampleAt, int randomSeed,
-                                  boolean overwrite, int threads,
+                                  boolean overwrite, int threads, DISTRIBUTION d,
                                   Logger log) throws InterruptedException, ExecutionException,
                                               IOException {
     new File(outputDir).mkdirs();
 
-    String[] extensions = new String[] {MosdepthUtils.MOSDEPHT_BED_EXT};
+    String[] extensions = new String[] {MosdepthUtils.MOSDEPTH_BED_EXT};
 
     // get all files with mosdepth bed extension
     List<String> mosDepthResultFiles;
     if (FileOps.isDir(input) && FileOps.dirExists(input)) {
       log.info("Detected " + input + " is a directory, searching for "
-               + MosdepthUtils.MOSDEPHT_BED_EXT + " extensions");
+               + MosdepthUtils.MOSDEPTH_BED_EXT + " extensions");
       mosDepthResultFiles = FileOps.listFilesWithExtension(input, extensions);
     } else if (FileOps.fileExists(input)) {
       log.info("Detected " + input + " is a file, reading mosdepth result file paths");
@@ -130,7 +132,7 @@ public class NGSPCA {
     // parse sample names from files
     List<String> samples = mosDepthResultFiles.stream()
                                               .map(f -> FileOps.stripDirectoryAndExtension(f,
-                                                                                           MosdepthUtils.MOSDEPHT_BED_EXT))
+                                                                                           MosdepthUtils.MOSDEPTH_BED_EXT))
                                               .collect(Collectors.toList());
 
     // load ucsc regions to use
@@ -140,7 +142,7 @@ public class NGSPCA {
                                                          overlapDetector, log);
     log.info(overlapDetector.getNumExcluded() + " regions removed during up-front filtering");
     if (sampleAt > 1) {
-      log.info("Sampling the" + regions.size() + " mosdepth regions once every " + sampleAt
+      log.info("Sampling the " + regions.size() + " mosdepth regions once every " + sampleAt
                + " bins");
       regions = IntStream.range(0, regions.size()).filter(n -> n % sampleAt == 0)
                          .mapToObj(regions::get).collect(Collectors.toList());
@@ -170,18 +172,18 @@ public class NGSPCA {
     //    RandomizedSVD.dumpMatrix(inputMatrix, dm, "BIN", samples.toArray(new String[samples.size()]),
     //                             regions.toArray(new String[regions.size()]), false, log);
 
-    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm);
+    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
   }
 
   static void computeSVD(String outputDir, int numPcs, int niters, int numOversamples,
                          int randomSeed, Logger log, List<String> samples, List<String> regions,
-                         BlockRealMatrix dm) {
+                         BlockRealMatrix dm, DISTRIBUTION d) {
     RandomizedSVD svd = new RandomizedSVD(samples, regions, log);
 
     log.info("Oversampling set to: " + numOversamples);
     log.info("Subspace iterations set to: " + niters);
     log.info("Random seed set to: " + randomSeed);
-    svd.fit(dm, numPcs, niters, numOversamples, randomSeed);
+    svd.fit(dm, numPcs, niters, numOversamples, randomSeed, d);
     // perform SVD
 
     String pcs = outputDir + "svd.pcs.txt";
@@ -230,20 +232,23 @@ public class NGSPCA {
 
       int randomSeed = Integer.parseInt(cmd.getOptionValue(CmdLine.RANDOM_SEED,
                                                            Integer.toString(CmdLine.DEFAULT_RANDOM_SEED)));
+
+      DISTRIBUTION d = DISTRIBUTION.valueOf(cmd.getOptionValue(CmdLine.DISTRIBUTION_ARG,
+                                                               CmdLine.DEFAULT_DISTRIBUTION.toString()));
       String bedExclude = cmd.getOptionValue(CmdLine.EXCLUDE_BED_FILE,
                                              CmdLine.DEFAULT_EXCLUDE_BED_FILE);
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
-        runInputMatrix(input, outputDir, numPcs, niters, numOversamples, sampleAt, randomSeed,
+        runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), log);
+                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, log);
       } else {
         runMosdepth(input, outputDir, bedExclude, REGION_STRATEGY.AUTOSOMAL, numPcs, niters,
                     numOversamples, sampleAt, randomSeed, cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                    threads, log);
+                    threads, d, log);
       }
     } catch (Exception e) {
       log.log(Level.SEVERE, "an exception was thrown", e);
-      log.severe("An exception occured while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
+      log.severe("An exception occurred while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
       CmdLine.printHelp(log, CmdLine.generateOptions());
     }
   }

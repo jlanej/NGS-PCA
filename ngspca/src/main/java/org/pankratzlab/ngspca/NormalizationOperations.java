@@ -43,7 +43,7 @@ public class NormalizationOperations {
     for (int column = 0; column < dm.getColumnDimension(); column++) {
       double[] tmp = new double[dm.getRowDimension()];
       for (int row = 0; row < dm.getRowDimension(); row++) {
-        tmp[row] += dm.getEntry(row, column);
+        tmp[row] = dm.getEntry(row, column);
       }
       medians[column] = Math.max(median(tmp), MIN_DEPTH);
     }

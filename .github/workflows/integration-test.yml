@@ -27,7 +27,7 @@ jobs:
         working-directory: ngspca
         run: mvn -B package --file pom.xml
 
-      - name: Run NGS-PCA on example data
+      - name: Run NGS-PCA (UNIFORM distribution)
         working-directory: example
         run: |
           mkdir -p test_output
@@ -39,7 +39,31 @@ jobs:
             -iters 10 \
             -randomSeed 42 \
             -oversample 2 \
+            -distribution UNIFORM \
             -bedExclude ../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+
+      - name: Run NGS-PCA (GAUSSIAN distribution)
+        working-directory: example
+        run: |
+          mkdir -p test_output_gaussian
+          java -jar ../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+            -input input.files.txt \
+            -outputDir test_output_gaussian/ \
+            -numPC 2 \
+            -sampleEvery 0 \
+            -iters 10 \
+            -randomSeed 42 \
+            -oversample 2 \
+            -distribution GAUSSIAN \
+            -bedExclude ../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+
+      - name: Generate UNIFORM vs GAUSSIAN distribution comparison
+        working-directory: example
+        run: |
+          python3 compare_distributions.py \
+            test_output/ \
+            test_output_gaussian/ \
+            test_output/distribution_comparison.txt
 
       - name: Verify output MD5 checksums
         working-directory: example
@@ -52,9 +76,9 @@ jobs:
             # Skip empty lines
             [ -z "$expected_md5" ] && continue
 
-            # Only check text output files (skip serialized intermediate files)
+            # Check svd.* output files and distribution_comparison.txt
             case "$filepath" in
-              ./exampleOutput_1000G_chr1/svd.*)
+              ./exampleOutput_1000G_chr1/svd.*|./exampleOutput_1000G_chr1/distribution_comparison.txt)
                 CHECKED=$((CHECKED + 1))
                 filename=$(basename "$filepath")
                 test_file="./test_output/$filename"

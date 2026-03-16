@@ -22,7 +22,7 @@ import htsjdk.tribble.bed.BEDFeature;
  */
 class MosdepthUtils {
 
-  static final String MOSDEPHT_BED_EXT = "regions.bed.gz";
+  static final String MOSDEPTH_BED_EXT = "regions.bed.gz";
 
   /**
    * TODO, region strategies for specific targets

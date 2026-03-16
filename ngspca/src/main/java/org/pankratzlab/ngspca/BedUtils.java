@@ -171,7 +171,7 @@ public class BedUtils {
         }
         List<BEDFeature> regions = loadAll(bedFile);
         log.info("Loaded " + regions.size() + " regions to detect overlaps from " + bedFile);
-        detector = OverlapDetector.create(loadAll(bedFile));
+        detector = OverlapDetector.create(regions);
       } else {
         detector = OverlapDetector.create(new ArrayList<>());
       }

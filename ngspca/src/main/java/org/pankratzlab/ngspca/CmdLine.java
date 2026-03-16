@@ -10,6 +10,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.pankratzlab.ngspca.RandomizedSVD.DISTRIBUTION;
 
 /**
  * Utility class to process cmdline arguments
@@ -28,11 +29,13 @@ class CmdLine {
   static final String N_ITERS = "iters";
   static final String OVERSAMPLE = "oversample";
   static final String RANDOM_SEED = "randomSeed";
+  static final String DISTRIBUTION_ARG = "distribution";
 
   static final int DEFAULT_RANDOM_SEED = 42;
   static final int DEFAULT_PCS = 20;
   static final int DEFAULT_SAMPLE = 1;
   static final String DEFAULT_EXCLUDE_BED_FILE = null;
+  static final DISTRIBUTION DEFAULT_DISTRIBUTION = DISTRIBUTION.UNIFORM;
 
   static final int DEFAULT_THREADS = 4;
 
@@ -56,14 +59,14 @@ class CmdLine {
                                    .hasArg(false).required(false).build();
     final Option inputOption = Option.builder("i").hasArg(true).longOpt(INPUT_ARG)
                                      .desc("An existing directory containing mosdepth result files (*"
-                                           + MosdepthUtils.MOSDEPHT_BED_EXT
+                                           + MosdepthUtils.MOSDEPTH_BED_EXT
                                            + " extension) OR a file listing paths to mosdepth result files, one result file per line OR a matrix of values to directly use (see the "
                                            + MATRIX_INPUT_ARG + " argument)")
                                      .required(true).build();
 
     final Option outputOption = Option.builder("o").hasArg(true).required().longOpt(OUTPUT_DIR_ARG)
                                       .hasArg()
-                                      .desc("PCA results and auxillary files will be placed here")
+                                      .desc("PCA results and auxiliary files will be placed here")
                                       .required().build();
     final Option numComponents = Option.builder("n").hasArg(true).required()
                                        .longOpt(NUM_COMPONENTS_ARG).hasArg()
@@ -81,7 +84,7 @@ class CmdLine {
                                      .hasArg()
                                      .desc("Sample mosdepth bins. For example, --" + NUM_SAMPLE_ARG
                                            + " 10 would select every tenth bin. Default is "
-                                           + DEFAULT_SAMPLE + "(use every bin)")
+                                           + DEFAULT_SAMPLE + " (use every bin)")
                                      .required(false).build();
 
     final Option bedExcludes = Option.builder("b").hasArg(true).required().longOpt(EXCLUDE_BED_FILE)
@@ -90,20 +93,28 @@ class CmdLine {
                                            + NUM_SAMPLE_ARG)
                                      .required(false).build();
     final Option niter = Option.builder(N_ITERS).hasArg(true).required().longOpt(N_ITERS).hasArg()
-                               .desc("specifies the number of power (subspace) iterations to reduce the approximation error. The power scheme is recommended, if the singular values decay slowly. In practice, 2 or 3 iterations achieve good results, however, computing power iterations increases the computational costs "
+                               .desc("Specifies the number of power (subspace) iterations to reduce the approximation error. The power scheme is recommended, if the singular values decay slowly. In practice, 2 or 3 iterations achieve good results, however, computing power iterations increases the computational costs. Default is "
                                      + RandomizedSVD.DEFAULT_NITERS)
                                .required(false).build();
     final Option oversamples = Option.builder(OVERSAMPLE).hasArg(true).required()
                                      .longOpt(OVERSAMPLE).hasArg()
-                                     .desc("An oversampling parameter to improve the approximation of the randomized PCA. A value of at least 10 is recommended"
+                                     .desc("An oversampling parameter to improve the approximation of the randomized PCA. A value of at least 10 is recommended. Default is "
                                            + RandomizedSVD.DEFAULT_OVERSAMPLES)
                                      .required(false).build();
 
     final Option randomSeed = Option.builder(RANDOM_SEED).hasArg(true).required()
                                     .longOpt(RANDOM_SEED).hasArg()
-                                    .desc("Random seed for generating sampling matrix for randomized PCA (probably not worth changing the default)"
+                                    .desc("Random seed for generating sampling matrix for randomized PCA (probably not worth changing the default). Default is "
                                           + DEFAULT_RANDOM_SEED)
                                     .required(false).build();
+
+    final Option distribution = Option.builder(DISTRIBUTION_ARG).hasArg(true)
+                                      .longOpt(DISTRIBUTION_ARG).hasArg()
+                                      .desc("The distribution used to seed the initial random matrix. Options are "
+                                            + DISTRIBUTION.UNIFORM.toString() + " or "
+                                            + DISTRIBUTION.GAUSSIAN.toString() + "."
+                                            + " Default is " + DEFAULT_DISTRIBUTION.toString())
+                                      .required(false).build();
     final Option matrix = Option.builder(MATRIX_INPUT_ARG).hasArg(false).longOpt(MATRIX_INPUT_ARG)
                                 .desc("The input provided by " + INPUT_ARG
                                       + " is a matrix (i.e. SVD will be performed directly on the matrix, without normalization, to generate PCS")
@@ -127,6 +138,7 @@ class CmdLine {
     options.addOption(niter);
     options.addOption(oversamples);
     options.addOption(randomSeed);
+    options.addOption(distribution);
     options.addOption(overwrite);
 
     return options;
