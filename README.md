@@ -63,7 +63,7 @@ For GRCh38/hg38 WES analysis, the WGS exclude bed file can be concatenated with 
 
 ### Brief pipeline description
 
-The jar can be downloaded from a release https://github.com/PankratzLab/NGS-PCA/releases or be run from docker
+The jar can be downloaded from a release https://github.com/PankratzLab/NGS-PCA/releases or be run from Docker / Apptainer
 
 
 The ngspca jar will essentially:
@@ -76,4 +76,29 @@ The ngspca jar will essentially:
 3. Perform Randomized PCA
 	- Described in https://epubs.siam.org/doi/abs/10.1137/090771806 and https://epubs.siam.org/doi/abs/10.1137/100804139
   	- Similar to the https://github.com/erichson/rSVD R package
+
+## Running with Apptainer (HPC)
+
+The published Docker image can be used directly on HPC systems via [Apptainer](https://apptainer.org/) (formerly Singularity):
+
+```bash
+apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
+
+apptainer run \
+  --bind /path/to/data:/data \
+  ngs-pca.sif \
+  -input /data/input.files.txt \
+  -outputDir /data/output/ \
+  -numPC 100 \
+  -sampleEvery 0 \
+  -threads 24 \
+  -iters 40 \
+  -randomSeed 42 \
+  -oversample 100 \
+  -bedExclude /data/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+```
+
+## Integration Testing
+
+CI validates deterministic output on every pull request and push to `main`/`master`. See [docs/integration-testing.md](docs/integration-testing.md) for how to reproduce results locally or on HPC with Apptainer.
 

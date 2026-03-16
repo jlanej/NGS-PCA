@@ -1,0 +1,89 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: ngspca
+        run: mvn -B package --file pom.xml
+
+      - name: Run NGS-PCA on example data
+        working-directory: example
+        run: |
+          mkdir -p test_output
+          java -jar ../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+            -input input.files.txt \
+            -outputDir test_output/ \
+            -numPC 2 \
+            -sampleEvery 0 \
+            -iters 10 \
+            -randomSeed 42 \
+            -oversample 2 \
+            -bedExclude ../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+
+      - name: Verify output MD5 checksums
+        working-directory: example
+        run: |
+          echo "Comparing output files against expected checksums..."
+          FAILED=0
+          CHECKED=0
+
+          while IFS='  ' read -r expected_md5 filepath; do
+            # Skip empty lines
+            [ -z "$expected_md5" ] && continue
+
+            # Only check text output files (skip serialized intermediate files)
+            case "$filepath" in
+              ./exampleOutput_1000G_chr1/svd.*)
+                CHECKED=$((CHECKED + 1))
+                filename=$(basename "$filepath")
+                test_file="./test_output/$filename"
+
+                if [ ! -f "$test_file" ]; then
+                  echo "MISSING: $test_file"
+                  FAILED=1
+                  continue
+                fi
+
+                actual_md5=$(md5sum "$test_file" | awk '{print $1}')
+                if [ "$actual_md5" = "$expected_md5" ]; then
+                  echo "PASS: $filename ($actual_md5)"
+                else
+                  echo "FAIL: $filename (expected: $expected_md5, got: $actual_md5)"
+                  FAILED=1
+                fi
+                ;;
+            esac
+          done < 1000G.chr1.md5
+
+          if [ "$CHECKED" -eq 0 ]; then
+            echo "::error::No output files were checked - verify MD5 file and output path patterns"
+            exit 1
+          fi
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::MD5 checksum verification failed"
+            exit 1
+          fi
+
+          echo "All $CHECKED output checksums match expected values."
