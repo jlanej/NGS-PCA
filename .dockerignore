@@ -1,0 +1,10 @@
+.git
+build
+example
+mosDepth
+resources
+LICENSE
+README.md
+.gitignore
+.dockerignore
+.github
