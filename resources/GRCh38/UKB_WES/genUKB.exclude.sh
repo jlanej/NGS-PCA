@@ -9,7 +9,7 @@
 #   zcat, awk, bgzip, tabix, bedtools
 #
 # Required input files:
-#   xgen_plus_spikein.b38.bed
+#   xgen_plus_spikein.b38.bed.gz (or uncompressed .bed)
 #       — UKB xgen exome capture BED (source: UK Biobank field 3801)
 #       — wget "http://biobank.ndph.ox.ac.uk/showcase/refer.cgi?id=3801"
 #   ../ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
@@ -30,7 +30,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 # Raw xgen capture BED (downloaded from UK Biobank field 3801)
-xgen_raw="xgen_plus_spikein.b38.bed"
+xgen_raw="xgen_plus_spikein.b38.bed.gz"
 
 # Compressed and indexed xgen BED with "chr" prefix added
 xgen_chr="xgen_plus_spikein.b38.chr.bed.gz"
@@ -50,7 +50,13 @@ buffer=20000
 #   - Apply ±20 kb buffer (clamp at 0 for negative start coordinates)
 # ---------------------------------------------------------------------------
 echo "[1/3] Buffering xgen capture intervals by ${buffer} bp..."
-cat "$xgen_raw" \
+if [[ "$xgen_raw" == *.gz ]]; then
+    xgen_reader="zcat"
+else
+    xgen_reader="cat"
+fi
+
+$xgen_reader "$xgen_raw" \
     | awk -v buf="$buffer" '{
         start = $2 - buf; if (start < 0) start = 0
         print "chr"$1"\t"start"\t"($3 + buf)
@@ -73,7 +79,6 @@ echo "[3/3] Indexing with tabix..."
 tabix "$out_bed"
 
 echo "Done. Output: ${out_bed}"
-
 
 
 

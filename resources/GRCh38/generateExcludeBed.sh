@@ -76,8 +76,10 @@ for kmer in 100 125 150; do
     # ------------------------------------------------------------------
     # DGV: wget "http://dgv.tcag.ca/dgv/docs/GRCh38_hg38_variants_2016-08-31.txt"
     echo "  [3/4] Adding DGV variants..."
-    awk 'NR>1 {print "chr"$2"\t"$3"\t"$4}' \
-        GRCh38_hg38_variants_2016-08-31.txt > "${prefix}.dgv.bed"
+    awk '{
+        line = "chr"$2"\t"$3"\t"$4
+        if (line !~ /start/) print line
+      }' GRCh38_hg38_variants_2016-08-31.txt > "${prefix}.dgv.bed"
     cat "${prefix}.sorted.merge.bed" >> "${prefix}.dgv.bed"
     sort -k1,1 -k2,2n "${prefix}.dgv.bed" \
         | bedtools merge > "${prefix}.dgv.sorted.merge.bed"
@@ -103,4 +105,3 @@ for kmer in 100 125 150; do
 done
 
 echo "Done."
-

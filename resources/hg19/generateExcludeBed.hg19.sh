@@ -72,8 +72,10 @@ bedtools sort -i "${prefix}.bed" \
 # ------------------------------------------------------------------
 # DGV: wget "http://dgv.tcag.ca/dgv/docs/GRCh37_hg19_variants_2016-05-15.txt"
 echo "[3/4] Adding DGV variants..."
-awk 'NR>1 {print "chr"$2"\t"$3"\t"$4}' \
-    GRCh37_hg19_variants_2016-05-15.txt > "${prefix}.dgv.bed"
+awk '{
+    line = "chr"$2"\t"$3"\t"$4
+    if (line !~ /start/) print line
+  }' GRCh37_hg19_variants_2016-05-15.txt > "${prefix}.dgv.bed"
 cat "${prefix}.sorted.merge.bed" >> "${prefix}.dgv.bed"
 bedtools sort -i "${prefix}.dgv.bed" \
     | bedtools merge > "${prefix}.dgv.sorted.merge.bed"
@@ -98,7 +100,6 @@ cp "${prefix}.dgv.gsd.sorted.merge.bed.gz" \
 tabix "${outDir}/${prefix}.dgv.gsd.sorted.merge.bed.gz"
 
 echo "Done. Output: ${outDir}/${prefix}.dgv.gsd.sorted.merge.bed.gz"
-
 
 
 
