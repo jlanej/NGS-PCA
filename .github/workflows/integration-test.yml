@@ -41,6 +41,7 @@ jobs:
         run: |
           echo "Comparing output files against expected checksums..."
           FAILED=0
+          CHECKED=0
 
           while IFS='  ' read -r expected_md5 filepath; do
             # Skip empty lines
@@ -49,6 +50,7 @@ jobs:
             # Only check text output files (skip serialized intermediate files)
             case "$filepath" in
               ./exampleOutput_1000G_chr1/svd.*)
+                CHECKED=$((CHECKED + 1))
                 filename=$(basename "$filepath")
                 test_file="./test_output/$filename"
 
@@ -69,9 +71,14 @@ jobs:
             esac
           done < 1000G.chr1.md5
 
+          if [ "$CHECKED" -eq 0 ]; then
+            echo "::error::No output files were checked - verify MD5 file and output path patterns"
+            exit 1
+          fi
+
           if [ "$FAILED" -ne 0 ]; then
             echo "::error::MD5 checksum verification failed"
             exit 1
           fi
 
-          echo "All output checksums match expected values."
+          echo "All $CHECKED output checksums match expected values."
