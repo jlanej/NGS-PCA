@@ -8,11 +8,11 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 
 1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
-3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/100804139). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
+3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
 ### Random matrix distribution
 
-The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`--distribution UNIFORM`). A `--distribution GAUSSIAN` option is available for strict adherence to the published algorithm.
+The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`). A `-distribution GAUSSIAN` option is available for strict adherence to the published algorithm.
 
 In practice, the choice has minimal effect on the resulting PCs because the power iteration (subspace iteration) scheme rapidly converges the column space regardless of the initial random matrix distribution. This was validated directly using the bundled 1000 Genomes chr1 example (n = 18 samples, 2 PCs): absolute Pearson *r* = 1.000 and Spearman *r* = 1.000 for PC1; absolute Pearson *r* = 0.9999 and Spearman *r* = 1.000 for PC2. The full per-PC comparison (mean, median, SD, Pearson and Spearman correlations) is available in [`example/exampleOutput_1000G_chr1/distribution_comparison.txt`](example/exampleOutput_1000G_chr1/distribution_comparison.txt) and is regenerated and checksum-verified on every CI run.
 
@@ -43,12 +43,37 @@ find "$dirOfBams" -type f -name "*.bam" \
 
 ## Step 2: Run NGS-PCA
 
-The JAR can be downloaded from a [release](https://github.com/PankratzLab/NGS-PCA/releases) or run via Docker / Apptainer.
+### On HPC with Apptainer (recommended)
 
-Example with production-scale parameters (the defaults are more conservative; see table below):
+Pull the pre-built image and run directly — no Java or Maven installation required:
 
 ```bash
-java -Xmx60G -jar ngspca.jar \
+apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
+
+apptainer run \
+  --bind /path/to/data:/data \
+  ngs-pca.sif \
+  -input /data/input.files.txt \
+  -outputDir /data/ngsPCA/ \
+  -numPC 100 \
+  -sampleEvery 0 \
+  -threads 24 \
+  -iters 40 \
+  -randomSeed 42 \
+  -oversample 100 \
+  -bedExclude /data/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+```
+
+### Building from source
+
+Requires Java 11+ and Maven 3.6+. The JAR is also available from a [GitHub release](https://github.com/PankratzLab/NGS-PCA/releases).
+
+```bash
+git clone https://github.com/jlanej/NGS-PCA.git
+cd NGS-PCA
+mvn -B package --file ngspca/pom.xml
+
+java -Xmx60G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
   -input /path/to/mosdepthOutput/ \
   -outputDir /path/to/ngsPCA/ \
   -numPC 100 \
@@ -60,10 +85,14 @@ java -Xmx60G -jar ngspca.jar \
   -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 ```
 
+The above examples use production-scale parameters; the defaults are more conservative (see table below).
+
 ### Key parameters
 
 | Parameter | Description | Default |
 |---|---|---|
+| `-input` | Directory of mosdepth result files (`*.regions.bed.gz`), a file listing one path per line, or (with `-matrix`) a pre-computed matrix. | — |
+| `-outputDir` | Directory where PCA results and auxiliary files will be written. | — |
 | `-numPC` | Number of PCs to compute. A value around 5 % of the sample size is a reasonable starting point. | 20 |
 | `-iters` | Power (subspace) iterations. More iterations improve accuracy at the cost of compute time. 10 is typically sufficient for large cohorts (10 K+); for smaller sample sizes, evaluate a range (e.g., 10–100). | 10 |
 | `-oversample` | Oversampling parameter; improves the approximation. At least 10 is recommended. | 200 |
@@ -72,6 +101,7 @@ java -Xmx60G -jar ngspca.jar \
 | `-threads` | Threads for loading mosdepth files. | 4 |
 | `-bedExclude` | BED file of regions to exclude before PCA. | — |
 | `-sampleEvery` | Keep every *n*-th bin (0 or 1 = use all bins). | 1 |
+| `-overwrite` | Flag: overwrite existing temporary (cached) files and recompute each step. | false |
 
 ### Exclusion BED files
 
@@ -91,25 +121,6 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 | `svd.singularvalues.txt` | Singular values per PC |
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers |
-
-## Running with Apptainer (HPC)
-
-```bash
-apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
-
-apptainer run \
-  --bind /path/to/data:/data \
-  ngs-pca.sif \
-  -input /data/input.files.txt \
-  -outputDir /data/output/ \
-  -numPC 100 \
-  -sampleEvery 0 \
-  -threads 24 \
-  -iters 40 \
-  -randomSeed 42 \
-  -oversample 100 \
-  -bedExclude /data/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
-```
 
 ## Integration Testing
 
