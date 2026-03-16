@@ -1,85 +1,94 @@
 # NGS-PCA
-Methods for running PCA on NGS data
 
+Principal component analysis of next-generation sequencing coverage data via randomized singular value decomposition.
 
-## Install [mosdepth](https://github.com/brentp/mosdepth)
+## Overview
 
-Install mosdepth using the instructions from https://github.com/brentp/mosdepth#installation.
-There are lots of ways to do this, including downloading a linux executable, as a Docker image, or using brew.
+NGS-PCA computes PCs from sequencing coverage across 1 kb genomic bins. The pipeline operates in three stages:
 
-## Run mosdepth on bams or crams
-The "--by 1000" (compute coverage on 1000bp bins) is really the only important argument, and each run is going to look something like this:
-`mosdepth -n -t 1 --by 1000 --fasta /path/to/GRCh38_full_analysis_set_plus_decoy_hla.fa output_filename input_filename.bam`
+1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).
+2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
+3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/100804139). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
-but here is an example script to iterate over all BAM files in a directory (could be run on CRAM files as well)
+### Random matrix distribution
+
+The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`--distribution UNIFORM`), which has been empirically validated to produce equivalent PCs when combined with power (subspace) iterations. A `--distribution GAUSSIAN` option is available for strict adherence to the published algorithm. In practice, the choice has minimal effect on the resulting PCs because the power iteration scheme rapidly converges the column space regardless of the initial random matrix distribution.
+
+## Prerequisites
+
+Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instructions](https://github.com/brentp/mosdepth#installation)).
+
+## Step 1: Run mosdepth
+
+Compute coverage in 1 kb bins (`--by 1000`):
+
+```bash
+mosdepth -n -t 1 --by 1000 \
+  --fasta /path/to/GRCh38_full_analysis_set_plus_decoy_hla.fa \
+  output_prefix input.bam
+```
+
+To process a directory of BAM/CRAM files in parallel:
 
 ```bash
 ref=/path/to/GRCh38_full_analysis_set_plus_decoy_hla.fa
-
 dirOfBams=/path/to/bams/
 mosdepthResultsDir=/path/to/mosdepthOutput/
-mosdepthThreads=1
-parallelThreads=24
 
 find "$dirOfBams" -type f -name "*.bam" \
-|parallel -j $parallelThreads "mosdepth -n -t $mosdepthThreads --by 1000 --fasta $ref $mosdepthResultsDir{/.}.by1000 {}"
+  | parallel -j 24 "mosdepth -n -t 1 --by 1000 --fasta $ref $mosdepthResultsDir{/.}.by1000 {}"
 ```
 
-## Run ngs pca
+## Step 2: Run NGS-PCA
 
-The number of PCs to compute should be in the range of 5% of your sample size and likely far more than you'll actually use.
-We're still working on optimizing the number of iterations and oversample parameter - but this should be reasonable. For smaller sample sizes it may be worth testing a range of `-iters` arguments (10,20,30,40,50,100,etc). More iterations increases the accuracy of the PCs, but also increases compute time. For larger sample sizes (10K+), 10 iterations appears to be sufficient.
-
-
-This will generate svd.pcs.txt in the output directory
+The JAR can be downloaded from a [release](https://github.com/PankratzLab/NGS-PCA/releases) or run via Docker / Apptainer.
 
 ```bash
-ngsPCAOutputDir=/path/to/ngsPCA/
-ngsPCAThreads=24
-# number of PCs to compute, will likely only use ~10 for 700 samples, so computing 100 should be plenty to play with
-numPCs=100
-
-ngsPCAExcludeRegions=ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
-jar=$HOME/ngspca.jar
-
-java -Xmx60G -jar "$jar" \
--input $mosDepthResultsDir \
--outputDir $ngsPCAOutputDir \
--numPC $numPCs \
--sampleEvery 0 \
--threads $ngsPCAThreads \
--iters 	40 \
--randomSeed 42 \
--oversample 100 \
--bedExclude $ngsPCAExcludeRegions
-
+java -Xmx60G -jar ngspca.jar \
+  -input /path/to/mosdepthOutput/ \
+  -outputDir /path/to/ngsPCA/ \
+  -numPC 100 \
+  -sampleEvery 0 \
+  -threads 24 \
+  -iters 40 \
+  -randomSeed 42 \
+  -oversample 100 \
+  -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 ```
-### Exclude bed
 
-`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed` can be found [here](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz). This bed file is suitable for analysis of GRCh38/hg38 WGS samples. 
+### Key parameters
 
-For GRCh38/hg38 WES analysis, the WGS exclude bed file can be concatenated with the bed file that defines the exome targets, where the targets have first been buffered by 20kb. A pre-made WES exclude bed suitable for UKB samples can be found [here](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/UKB_WES/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz). The original targets used to generate this file are sourced from http://biobank.ndph.ox.ac.uk/showcase/refer.cgi?id=3801 and can be retrieved with `wget  -nd  biobank.ndph.ox.ac.uk/showcase/showcase/auxdata/xgen_plus_spikein.b38.bed`
+| Parameter | Description | Default |
+|---|---|---|
+| `-numPC` | Number of PCs to compute. A value around 5 % of the sample size is a reasonable starting point. | 20 |
+| `-iters` | Power (subspace) iterations. More iterations improve accuracy at the cost of compute time. 10 is typically sufficient for large cohorts (10 K+); for smaller sample sizes, evaluate a range (e.g., 10–100). | 10 |
+| `-oversample` | Oversampling parameter; improves the approximation. At least 10 is recommended. | 200 |
+| `-distribution` | Distribution for the initial random matrix: `UNIFORM` or `GAUSSIAN`. | UNIFORM |
+| `-randomSeed` | Random seed for reproducibility. | 42 |
+| `-threads` | Threads for loading mosdepth files. | 4 |
+| `-bedExclude` | BED file of regions to exclude before PCA. | — |
+| `-sampleEvery` | Keep every *n*-th bin (0 or 1 = use all bins). | 1 |
 
+### Exclusion BED files
 
-### Brief pipeline description
+Pre-built exclusion BED files are provided in `resources/`:
 
-The jar can be downloaded from a release https://github.com/PankratzLab/NGS-PCA/releases or be run from Docker / Apptainer
+- **WGS (GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz)
+- **WES (UKB, GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/UKB_WES/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz) — combines the WGS exclusion regions with 20 kb-buffered xgen exome targets ([source](http://biobank.ndph.ox.ac.uk/showcase/refer.cgi?id=3801)).
 
+For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered version of the capture target BED.
 
-The ngspca jar will essentially:
+### Output files
 
-1. Select autosomal bins that do not overlap any region in the excluded bed
-2. Normalize input data
-	- Normalize within sample by computing fold change 
-		- log2(coverage of bin / median coverage of all selected bins)
-	- Center each bin to median fold-change of 0 across all samples 
-3. Perform Randomized PCA
-	- Described in https://epubs.siam.org/doi/abs/10.1137/090771806 and https://epubs.siam.org/doi/abs/10.1137/100804139
-  	- Similar to the https://github.com/erichson/rSVD R package
+| File | Contents |
+|---|---|
+| `svd.pcs.txt` | Sample × PC matrix |
+| `svd.loadings.txt` | Bin × loading matrix |
+| `svd.singularvalues.txt` | Singular values per PC |
+| `svd.bins.txt` | Genomic bins retained after filtering |
+| `svd.samples.txt` | Sample identifiers |
 
 ## Running with Apptainer (HPC)
-
-The published Docker image can be used directly on HPC systems via [Apptainer](https://apptainer.org/) (formerly Singularity):
 
 ```bash
 apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
