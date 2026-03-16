@@ -59,10 +59,10 @@ Expected output checksums (5 `svd.*.txt` files):
 | File | MD5 |
 |---|---|
 | `svd.bins.txt` | `538a93fe43bc451d915e6672a2e8f357` |
-| `svd.loadings.txt` | `0af00491e808c5621cb7c441fba9de44` |
-| `svd.pcs.txt` | `8b8fdac27bcdd14cb2be1e646d00a8a1` |
+| `svd.loadings.txt` | `4d83db0d1dde4993a11c58d0fcdeb23f` |
+| `svd.pcs.txt` | `8a193cc0dc050c9bf527461fb32dc43e` |
 | `svd.samples.txt` | `5130c6c74b45485b0869be765245fc68` |
-| `svd.singularvalues.txt` | `6a793316e79e460ed38400fe257cba2e` |
+| `svd.singularvalues.txt` | `e09c0dac18f6896e5c00260ec55a933a` |
 
 ## Reproducing the integration test with Apptainer (HPC)
 

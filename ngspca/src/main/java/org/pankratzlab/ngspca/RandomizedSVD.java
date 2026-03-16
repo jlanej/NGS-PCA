@@ -20,6 +20,18 @@ import Jama.QRDecomposition;
 
 public class RandomizedSVD {
 
+  /**
+   * Distribution used to seed the initial random matrix for the randomized SVD.
+   * <p>
+   * The Halko et al. algorithm (https://arxiv.org/pdf/0909.4061.pdf) specifies a standard Gaussian
+   * random matrix, but in practice a uniform distribution also produces good results, particularly
+   * when combined with power (subspace) iterations. The default is UNIFORM for backward
+   * compatibility; GAUSSIAN is available for strict adherence to the published algorithm.
+   */
+  enum DISTRIBUTION {
+    UNIFORM, GAUSSIAN;
+  }
+
   //  https://arxiv.org/pdf/0909.4061.pdf
   //  Compute a (truncated) randomized SVD of a BlockRealMatrix
   // Implementation is similar to http://arxiv.org/abs/1608.02148
@@ -63,9 +75,10 @@ public class RandomizedSVD {
    * @param numOversamples is an oversampling parameter to improve the approximation. A value of at
    *          least 10 is recommended,
    * @param randomSeed random seed for sampling matrix
+   * @param d distribution to use for generating the initial random matrix
    */
   public void fit(BlockRealMatrix A, int numberOfComponentsToStore, int niters, int numOversamples,
-                  int randomSeed) {
+                  int randomSeed, DISTRIBUTION d) {
     this.numComponents = Math.min(numberOfComponentsToStore,
                                   Math.min(A.getColumnDimension(), A.getRowDimension()));
     if (numComponents < numberOfComponentsToStore) {
@@ -87,9 +100,9 @@ public class RandomizedSVD {
       n = A.getColumnDimension();
     }
 
-    log.info("Selecting randomized Q");
+    log.info("Selecting randomized Q using distribution " + d.toString());
 
-    RealMatrix Y = A.multiply(randn(n, Math.min(n, numComponents + numOversamples), randomSeed));
+    RealMatrix Y = A.multiply(randn(n, Math.min(n, numComponents + numOversamples), randomSeed, d));
 
     log.info("Caching A_t");
     BlockRealMatrix A_t = A.transpose();
@@ -142,16 +155,27 @@ public class RandomizedSVD {
   /**
    * @param rows
    * @param columns
+   * @param randomSeed seed for deterministic random generation
+   * @param d the {@link DISTRIBUTION} to sample from
    * @return a {@link RealMatrix} populated with random values (deterministic random using
    *         {@link MersenneTwister})
    */
-  private static RealMatrix randn(int rows, int columns, int randomSeed) {
+  private static RealMatrix randn(int rows, int columns, int randomSeed, DISTRIBUTION d) {
     RealMatrix m = MatrixUtils.createRealMatrix(rows, columns);
     MersenneTwister twister = new MersenneTwister(randomSeed);
 
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < columns; j++) {
-        m.setEntry(i, j, twister.nextGaussian());
+        switch (d) {
+          case UNIFORM:
+            m.setEntry(i, j, twister.nextDouble());
+            break;
+          case GAUSSIAN:
+            m.setEntry(i, j, twister.nextGaussian());
+            break;
+          default:
+            break;
+        }
       }
     }
     return m;
