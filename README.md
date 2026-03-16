@@ -64,9 +64,26 @@ apptainer run \
   -bedExclude /data/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 ```
 
+### Download pre-built JAR
+
+Pre-built fat JARs are published automatically by GitHub Actions on every tagged release. Download the latest `ngspca-vX.Y.jar` from the [Releases page](https://github.com/jlanej/NGS-PCA/releases), then run:
+
+```bash
+java -Xmx60G -jar ngspca-vX.Y.jar \
+  -input /path/to/mosdepthOutput/ \
+  -outputDir /path/to/ngsPCA/ \
+  -numPC 100 \
+  -sampleEvery 0 \
+  -threads 24 \
+  -iters 40 \
+  -randomSeed 42 \
+  -oversample 100 \
+  -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+```
+
 ### Building from source
 
-Requires Java 11+ and Maven 3.6+. The JAR is also available from a [GitHub release](https://github.com/PankratzLab/NGS-PCA/releases).
+Requires Java 11+ and Maven 3.6+:
 
 ```bash
 git clone https://github.com/jlanej/NGS-PCA.git

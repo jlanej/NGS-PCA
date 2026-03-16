@@ -1,0 +1,62 @@
+name: Release JAR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for the JAR (e.g. v1.0.0)'
+        required: true
+        default: 'dev'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: ngspca
+        run: mvn -B package --file pom.xml
+
+      - name: Determine version label
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Get Maven artifact version
+        id: mvn_version
+        working-directory: ngspca
+        run: |
+          ARTIFACT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "ARTIFACT_VERSION=${ARTIFACT_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Rename JAR for release
+        run: |
+          SRC="ngspca/target/ngspca-${ARTIFACT_VERSION}.jar"
+          DEST="ngspca-${VERSION}.jar"
+          cp "$SRC" "$DEST"
+          echo "JAR_PATH=${DEST}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release and upload JAR
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.JAR_PATH }}
+          generate_release_notes: true
