@@ -12,7 +12,9 @@ NGS-PCA computes PCs from sequencing coverage across 1 kb genomic bins. The pipe
 
 ### Random matrix distribution
 
-The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`--distribution UNIFORM`), which has been empirically validated to produce equivalent PCs when combined with power (subspace) iterations. A `--distribution GAUSSIAN` option is available for strict adherence to the published algorithm. In practice, the choice has minimal effect on the resulting PCs because the power iteration scheme rapidly converges the column space regardless of the initial random matrix distribution.
+The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`--distribution UNIFORM`). A `--distribution GAUSSIAN` option is available for strict adherence to the published algorithm.
+
+In practice, the choice has minimal effect on the resulting PCs because the power iteration (subspace iteration) scheme rapidly converges the column space regardless of the initial random matrix distribution. This was validated directly using the bundled 1000 Genomes chr1 example (n = 18 samples, 2 PCs): absolute Pearson *r* = 1.000 and Spearman *r* = 1.000 for PC1; absolute Pearson *r* = 0.9999 and Spearman *r* = 1.000 for PC2. The full per-PC comparison (mean, median, SD, Pearson and Spearman correlations) is available in [`example/exampleOutput_1000G_chr1/distribution_comparison.txt`](example/exampleOutput_1000G_chr1/distribution_comparison.txt) and is regenerated and checksum-verified on every CI run.
 
 ## Prerequisites
 
