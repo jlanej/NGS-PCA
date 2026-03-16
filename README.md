@@ -10,10 +10,6 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
 3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
-### Random matrix distribution
-
-This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`); `-distribution GAUSSIAN` is available for strict adherence to the Halko et al. paper. In practice the choice has negligible effect on results when power iterations are used. See [docs/random-matrix-distribution.md](docs/random-matrix-distribution.md) for full details and validation results.
-
 ## Prerequisites
 
 Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instructions](https://github.com/brentp/mosdepth#installation)).
@@ -136,6 +132,10 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 | `svd.singularvalues.txt` | Singular values per PC |
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers |
+
+## Random matrix distribution
+
+This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`); `-distribution GAUSSIAN` is available for strict adherence to the Halko et al. paper. In practice the choice has negligible effect on results when power iterations are used. See [docs/random-matrix-distribution.md](docs/random-matrix-distribution.md) for full details and validation results.
 
 ## Integration Testing
 

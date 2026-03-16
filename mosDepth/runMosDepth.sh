@@ -1,65 +1,78 @@
 #!/usr/bin/env bash
+# runMosDepth.sh — Generate per-sample mosdepth commands and optionally run them.
+#
+# Usage:
+#   bash runMosDepth.sh
+#
+# Prerequisites:
+#   mosdepth (https://github.com/brentp/mosdepth)
+#   GNU parallel (optional, for parallel execution)
+#
+# Installation (conda/bioconda — Python 3):
+#   conda config --add channels defaults
+#   conda config --add channels conda-forge
+#   conda config --add channels bioconda
+#   conda install mosdepth
+#
+# See also:
+#   https://docs.anaconda.com/anaconda/install/linux
+#   https://github.com/brentp/mosdepth
 
-## 1. Installing anaconda:
+set -euo pipefail
 
-## See https://docs.anaconda.com/anaconda/install/linux for more details
+# ---------------------------------------------------------------------------
+# Configuration — edit these variables before running
+# ---------------------------------------------------------------------------
 
-## download linux anaconda package for python 2.7
+# Directory where mosdepth output files will be written
+mosDepthResultsDir="${HOME}/mosdepthOutput/"
 
-# wget "https://repo.anaconda.com/archive/Anaconda2-5.1.0-Linux-x86_64.sh"
+# Reference genome FASTA (GRCh38 recommended)
+ref="${HOME}/ref/GRCh38_full_analysis_set_plus_decoy_hla.fa"
 
-# bash Anaconda2-5.1.0-Linux-x86_64.sh
+# Directory containing input CRAM (or BAM) files
+inDir="${HOME}/TOPMedCrams/"
 
-## 2. Configure bioconda:
+# File extension of input files ("cram" or "bam")
+ext="cram"
 
-# conda config --add channels defaults
-# conda config --add channels conda-forge
-# conda config --add channels bioconda
+# File that will hold one mosdepth command per line
+cmdFile="${mosDepthResultsDir}mosdepthCommands.txt"
 
+# ---------------------------------------------------------------------------
+# Step 1: Create output directory and command file
+# ---------------------------------------------------------------------------
 
-## 3. Install MosDepth:
-## See https://github.com/brentp/mosdepth for more details
-
-# conda install mosdepth
-
-
-
-## 4. Generate MosDepth script:
-
-# where output will be written
-mosDepthResultsDir=$HOME/mosdepthOutput/
-# create output directory
 mkdir -p "$mosDepthResultsDir"
-# file which will contain commands to run (this will be generated below)
-cmdFile=$mosDepthResultsDir"mosdepthCommands.txt"
-# TOPMed reference genome
-ref=$HOME/ref/GRCh38_full_analysis_set_plus_decoy_hla.fa
-# Location of TOPMed Crams
-inDir=$HOME/TOPMedCrams/
 
-# clears $cmdFile if already present
-echo "" > "$cmdFile"
+# Truncate (or create) the command file
+: > "$cmdFile"
 
-#If .crams are listed in a one-column file instead, could also do something like:
-## for file in $(cat fileOfCrams.txt); do
+# ---------------------------------------------------------------------------
+# Step 2: Generate one mosdepth command per input file
+# ---------------------------------------------------------------------------
+# Options used:
+#   -n          skip per-base depth output (saves disk space and time)
+#   -t 2        use 2 threads per sample
+#   --by 1000   compute coverage in 1 000 bp bins
+#   --fasta     required for CRAM decoding
 
-for file in $inDir*.cram; do
-
-   out=$(basename "$file" .cram)
-   echo "/path/to/mosdepth -n -t 2 --by 1000 --fasta $ref $mosDepthResultsDir$out.mos $file" >> "$cmdFile"
-
-   # /path/to/mosdepth is typically $HOME/anaconda2/bin/mosdepth
-   # "-t 2" use two threads 
-   # "--by 1000" compute coverage on 1000bp bins
-   # "-n" don't output per-base depth (save space and time)
-   # Could add "--chrom chr1" to limit to chr1 only (~17 mins per sample for whole genome, ~ 1-2 mins for chr1 )
-
+for file in "$inDir"*."$ext"; do
+    [ -e "$file" ] || { echo "No ${ext} files found in ${inDir}"; exit 1; }
+    out=$(basename "$file" ".$ext")
+    echo "mosdepth -n -t 2 --by 1000 --fasta $ref ${mosDepthResultsDir}${out}.mos $file" >> "$cmdFile"
 done
 
-## 5. Run MosDepth script:
+echo "Commands written to: $cmdFile"
 
-## execute commands in $cmdFile, possibly with gnu parallel, https://www.gnu.org/software/parallel/
+# ---------------------------------------------------------------------------
+# Step 3: Run the commands (uncomment one of the options below)
+# ---------------------------------------------------------------------------
+
+# Option A — sequential (simple, no dependencies)
+# bash "$cmdFile"
+
+# Option B — parallel with GNU parallel (recommended for large cohorts)
+#   "parallel --jobs 12 < $cmdFile" uses 12 samples × 2 threads = 24 threads total
 # parallel --jobs 12 < "$cmdFile"
-## "parallel --jobs 12 < $cmdFile" as set up would use 24 threads (2 threads per sample, 12 samples at once) 
-
 
