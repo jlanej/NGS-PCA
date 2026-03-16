@@ -174,7 +174,7 @@ public class RandomizedSVD {
             m.setEntry(i, j, twister.nextGaussian());
             break;
           default:
-            break;
+            throw new IllegalArgumentException("Unsupported distribution: " + d);
         }
       }
     }

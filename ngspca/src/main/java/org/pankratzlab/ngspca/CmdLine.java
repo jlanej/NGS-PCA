@@ -108,7 +108,7 @@ class CmdLine {
                                           + DEFAULT_RANDOM_SEED)
                                     .required(false).build();
 
-    final Option distribution = Option.builder(DISTRIBUTION_ARG).hasArg(true).required()
+    final Option distribution = Option.builder(DISTRIBUTION_ARG).hasArg(true)
                                       .longOpt(DISTRIBUTION_ARG).hasArg()
                                       .desc("The distribution used to seed the initial random matrix. Options are "
                                             + DISTRIBUTION.UNIFORM.toString() + " or "
