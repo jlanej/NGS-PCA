@@ -43,6 +43,8 @@ find "$dirOfBams" -type f -name "*.bam" \
 
 The JAR can be downloaded from a [release](https://github.com/PankratzLab/NGS-PCA/releases) or run via Docker / Apptainer.
 
+Example with production-scale parameters (the defaults are more conservative; see table below):
+
 ```bash
 java -Xmx60G -jar ngspca.jar \
   -input /path/to/mosdepthOutput/ \
