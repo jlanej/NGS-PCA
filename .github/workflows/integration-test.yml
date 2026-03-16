@@ -9,6 +9,8 @@ on:
 jobs:
   integration-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -33,7 +35,10 @@ jobs:
             -input input.files.txt \
             -outputDir test_output/ \
             -numPC 2 \
+            -sampleEvery 0 \
+            -iters 10 \
             -randomSeed 42 \
+            -oversample 2 \
             -bedExclude ../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 
       - name: Verify output MD5 checksums
