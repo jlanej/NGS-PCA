@@ -12,9 +12,7 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 
 ### Random matrix distribution
 
-The Halko et al. algorithm specifies a standard Gaussian random test matrix. This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`). A `-distribution GAUSSIAN` option is available for strict adherence to the published algorithm.
-
-In practice, the choice has minimal effect on the resulting PCs because the power iteration (subspace iteration) scheme rapidly converges the column space regardless of the initial random matrix distribution. This was validated directly using the bundled 1000 Genomes chr1 example (n = 18 samples, 2 PCs): absolute Pearson *r* = 1.000 and Spearman *r* = 1.000 for PC1; absolute Pearson *r* = 0.9999 and Spearman *r* = 1.000 for PC2. The full per-PC comparison (mean, median, SD, Pearson and Spearman correlations) is available in [`example/exampleOutput_1000G_chr1/distribution_comparison.txt`](example/exampleOutput_1000G_chr1/distribution_comparison.txt) and is regenerated and checksum-verified on every CI run.
+This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`); `-distribution GAUSSIAN` is available for strict adherence to the Halko et al. paper. In practice the choice has negligible effect on results when power iterations are used. See [docs/random-matrix-distribution.md](docs/random-matrix-distribution.md) for full details and validation results.
 
 ## Prerequisites
 
@@ -142,4 +140,8 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 ## Integration Testing
 
 CI validates deterministic output on every pull request and push to `main`/`master`. See [docs/integration-testing.md](docs/integration-testing.md) for how to reproduce results locally or on HPC with Apptainer.
+
+## Future Work
+
+See [docs/future-work.md](docs/future-work.md) for a summary of known performance, scientific, and code-quality improvements that are planned or under consideration.
 

@@ -125,7 +125,7 @@ public class RandomizedSVD {
 
     RealMatrix Q = MatrixUtils.createRealMatrix(new QRDecomposition(new Matrix(Y.getData())).getQ()
                                                                                             .getArray());
-    log.info("Q %*% Y");
+    log.info("Q^T %*% A");
     RealMatrix B = Q.transpose().multiply(A);
     log.info("SVD of reduced matrix");
     SingularValueDecomposition svd = new SingularValueDecomposition(B);
