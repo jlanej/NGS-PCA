@@ -151,7 +151,7 @@ public class RandomizedSVD {
 
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < columns; j++) {
-        m.setEntry(i, j, twister.nextDouble());
+        m.setEntry(i, j, twister.nextGaussian());
       }
     }
     return m;

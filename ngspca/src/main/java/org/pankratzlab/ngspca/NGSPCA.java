@@ -25,7 +25,7 @@ import org.pankratzlab.ngspca.MosdepthUtils.REGION_STRATEGY;
 public class NGSPCA {
 
   private static void runInputMatrix(String inputMatrixFile, String outputDir, int numPcs,
-                                     int niters, int numOversamples, int sampleAt, int randomSeed,
+                                     int niters, int numOversamples, int randomSeed,
                                      boolean overwrite, boolean normMatrix,
                                      Logger log) throws InterruptedException, ExecutionException,
                                                  IOException {
@@ -59,12 +59,13 @@ public class NGSPCA {
       dm = new BlockRealMatrix(regions.size(), samples.size());
       int[] rowIndex = {0};
       //add data to matrix, skipping header and first column of file
-      Stream<String> stream = gz ? FileOps.gzLines(Paths.get(inputMatrixFile), log)
-                                 : Files.lines(Paths.get(inputMatrixFile));
-      stream.skip(1).map(l -> l.split(delim))
-            .forEach(a -> dm.setRow(rowIndex[0]++,
-                                    Utils.convertToDoubleArray(Arrays.copyOfRange(a, 1, a.length),
-                                                               0, log)));
+      try (Stream<String> stream = gz ? FileOps.gzLines(Paths.get(inputMatrixFile), log)
+                                      : Files.lines(Paths.get(inputMatrixFile))) {
+        stream.skip(1).map(l -> l.split(delim))
+              .forEach(a -> dm.setRow(rowIndex[0]++,
+                                      Utils.convertToDoubleArray(Arrays.copyOfRange(a, 1, a.length),
+                                                                 0, log)));
+      }
       if (normMatrix) {
         log.info("Normalizing input matrix");
         NormalizationOperations.foldChangeAndCenterRows(dm, log);
@@ -80,7 +81,7 @@ public class NGSPCA {
 
   /**
    * @param input directory or file listing full paths containing MosDepth results, with extension
-   *          {@link MosdepthUtils#MOSDEPHT_BED_EXT}
+   *          {@link MosdepthUtils#MOSDEPTH_BED_EXT}
    * @param outputDir where results will be written
    * @param bedExclude if not null, regions overlapping this bed file will not be included
    * @param regionStrategy how to select markers for PCA
@@ -102,13 +103,13 @@ public class NGSPCA {
                                               IOException {
     new File(outputDir).mkdirs();
 
-    String[] extensions = new String[] {MosdepthUtils.MOSDEPHT_BED_EXT};
+    String[] extensions = new String[] {MosdepthUtils.MOSDEPTH_BED_EXT};
 
     // get all files with mosdepth bed extension
     List<String> mosDepthResultFiles;
     if (FileOps.isDir(input) && FileOps.dirExists(input)) {
       log.info("Detected " + input + " is a directory, searching for "
-               + MosdepthUtils.MOSDEPHT_BED_EXT + " extensions");
+               + MosdepthUtils.MOSDEPTH_BED_EXT + " extensions");
       mosDepthResultFiles = FileOps.listFilesWithExtension(input, extensions);
     } else if (FileOps.fileExists(input)) {
       log.info("Detected " + input + " is a file, reading mosdepth result file paths");
@@ -130,7 +131,7 @@ public class NGSPCA {
     // parse sample names from files
     List<String> samples = mosDepthResultFiles.stream()
                                               .map(f -> FileOps.stripDirectoryAndExtension(f,
-                                                                                           MosdepthUtils.MOSDEPHT_BED_EXT))
+                                                                                           MosdepthUtils.MOSDEPTH_BED_EXT))
                                               .collect(Collectors.toList());
 
     // load ucsc regions to use
@@ -140,7 +141,7 @@ public class NGSPCA {
                                                          overlapDetector, log);
     log.info(overlapDetector.getNumExcluded() + " regions removed during up-front filtering");
     if (sampleAt > 1) {
-      log.info("Sampling the" + regions.size() + " mosdepth regions once every " + sampleAt
+      log.info("Sampling the " + regions.size() + " mosdepth regions once every " + sampleAt
                + " bins");
       regions = IntStream.range(0, regions.size()).filter(n -> n % sampleAt == 0)
                          .mapToObj(regions::get).collect(Collectors.toList());
@@ -233,7 +234,7 @@ public class NGSPCA {
       String bedExclude = cmd.getOptionValue(CmdLine.EXCLUDE_BED_FILE,
                                              CmdLine.DEFAULT_EXCLUDE_BED_FILE);
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
-        runInputMatrix(input, outputDir, numPcs, niters, numOversamples, sampleAt, randomSeed,
+        runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
                        cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), log);
       } else {
@@ -243,7 +244,7 @@ public class NGSPCA {
       }
     } catch (Exception e) {
       log.log(Level.SEVERE, "an exception was thrown", e);
-      log.severe("An exception occured while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
+      log.severe("An exception occurred while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
       CmdLine.printHelp(log, CmdLine.generateOptions());
     }
   }

@@ -156,9 +156,8 @@ public class FileOps {
 
   static List<String> getFileHeader(String filename, boolean gz, String delim, Logger log) {
     List<String> header = new ArrayList<String>();
-    try {
-      Stream<String> stream = gz ? gzLines(Paths.get(filename), log)
-                                 : Files.lines(Paths.get(filename));
+    try (Stream<String> stream = gz ? gzLines(Paths.get(filename), log)
+                                    : Files.lines(Paths.get(filename))) {
       String[] tmpA = stream.findFirst().get().split(delim);
       for (String tmp : tmpA) {
         header.add(tmp);
