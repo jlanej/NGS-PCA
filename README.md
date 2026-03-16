@@ -4,7 +4,7 @@ Principal component analysis of next-generation sequencing coverage data via ran
 
 ## Overview
 
-NGS-PCA computes PCs from sequencing coverage across 1 kb genomic bins. The pipeline operates in three stages:
+NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
 
 1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
@@ -22,7 +22,7 @@ Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instru
 
 ## Step 1: Run mosdepth
 
-Compute coverage in 1 kb bins (`--by 1000`):
+Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported:
 
 ```bash
 mosdepth -n -t 1 --by 1000 \
