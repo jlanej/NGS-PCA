@@ -51,7 +51,7 @@ bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.g
 iters=10
 oversample=0
 
-/usr/bin/time -v apptainer run \
+apptainer run \
   --bind /path/to/data:/data \
   ngs-pca.sif \
   -input /data/input.files.txt \
@@ -74,7 +74,7 @@ bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.g
 iters=10
 oversample=0
 
-/usr/bin/time -v java -Xmx1800G -jar ngspca-vX.Y.jar \
+java -Xmx1800G -jar ngspca-vX.Y.jar \
   -input /path/to/mosdepthOutput/ \
   -outputDir /path/to/ngsPCA/ \
   -numPC $numPC \
@@ -99,7 +99,7 @@ bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.g
 iters=10
 oversample=0
 
-/usr/bin/time -v java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
   -input /path/to/mosdepthOutput/ \
   -outputDir /path/to/ngsPCA/ \
   -numPC $numPC \
