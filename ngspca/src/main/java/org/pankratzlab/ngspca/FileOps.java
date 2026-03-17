@@ -139,6 +139,9 @@ public class FileOps {
       closeSafely(gzipIs, log);
       closeSafely(bufferedIs, log);
       closeSafely(fileIs, log);
+      // TODO (future work): If IOException is caught here, return Stream.empty() or throw an
+      // UncheckedIOException instead of continuing, to avoid a NullPointerException on the line
+      // below when gzipIs is null (silent NPE produces a confusing stack trace for end-users).
     }
     BufferedReader reader = new BufferedReader(new InputStreamReader(gzipIs));
     return reader.lines().onClose(() -> closeSafely(reader, log));

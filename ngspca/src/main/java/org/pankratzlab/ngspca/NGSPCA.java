@@ -52,7 +52,7 @@ public class NGSPCA {
 
     BlockRealMatrix dm;
 
-    String tmpNormDm = outputDir + "tmp.mat.ser.gz";
+    String tmpNormDm = Paths.get(outputDir, "tmp.mat.ser.gz").toString();
     if (!FileOps.fileExists(tmpNormDm) || overwrite) {
       log.info("Populating matrix from " + inputMatrixFile);
       log.info("Initializing matrix to " + samples.size() + " columns and " + regions.size()
@@ -150,9 +150,9 @@ public class NGSPCA {
 
     }
     // Store the raw input matrix
-    String tmpRawDm = outputDir + "tmp.raw.ser.gz";
+    String tmpRawDm = Paths.get(outputDir, "tmp.raw.ser.gz").toString();
     // Store the temporary input matrix
-    String tmpNormDm = outputDir + "tmp.mat.ser.gz";
+    String tmpNormDm = Paths.get(outputDir, "tmp.mat.ser.gz").toString();
 
     // populate input matrix and normalize
     BlockRealMatrix dm;
@@ -166,7 +166,7 @@ public class NGSPCA {
       log.info("Loading existing serialized file " + tmpNormDm);
       dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
     }
-    //    String inputMatrix = outputDir + "svd.norm.input.txt";
+    //    String inputMatrix = Paths.get(outputDir, "svd.norm.input.txt").toString();
     //    log.info("Writing to " + inputMatrix);
     //
     //    RandomizedSVD.dumpMatrix(inputMatrix, dm, "BIN", samples.toArray(new String[samples.size()]),
@@ -186,11 +186,11 @@ public class NGSPCA {
     svd.fit(dm, numPcs, niters, numOversamples, randomSeed, d);
     // perform SVD
 
-    String pcs = outputDir + "svd.pcs.txt";
-    String loadings = outputDir + "svd.loadings.txt";
-    String singularValues = outputDir + "svd.singularvalues.txt";
-    String binsUsed = outputDir + "svd.bins.txt";
-    String samplesUsed = outputDir + "svd.samples.txt";
+    String pcs = Paths.get(outputDir, "svd.pcs.txt").toString();
+    String loadings = Paths.get(outputDir, "svd.loadings.txt").toString();
+    String singularValues = Paths.get(outputDir, "svd.singularvalues.txt").toString();
+    String binsUsed = Paths.get(outputDir, "svd.bins.txt").toString();
+    String samplesUsed = Paths.get(outputDir, "svd.samples.txt").toString();
 
     log.info("Writing to " + pcs);
     svd.dumpPCsToText(pcs, log);

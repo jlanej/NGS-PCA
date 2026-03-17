@@ -97,11 +97,19 @@ class MosdepthUtils {
     int col = 0;
     //    https://dzone.com/articles/the-evolution-of-producer-consumer-problem-in-java
     BlockingQueue<Future<BedRegionResult>> blockingQueue = new LinkedBlockingDeque<>(threads);
+    // TODO (future work): Run the producer on a dedicated thread (new Thread(producerTask).start())
+    // instead of submitting it to the shared ExecutorService. With a small fixed pool (e.g.
+    // -threads 2), the producer occupies one thread permanently, leaving too few threads for the
+    // actual file-reading work and risking deadlocks when the blocking queue backs up.
     ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 2));
 
     Runnable producerTask = () -> {
       try {
         for (String mosDepthResultFile : mosDepthResultFiles) {
+          // TODO (future work): Replace BEDFileReader/BEDFeature usage with a plain BufferedReader
+          // that splits each tab-delimited line and parses column 4 as a double directly. HTSJDK
+          // creates a heavy BEDFeature object per line; for whole-genome 1 kb bins (~3 M lines per
+          // sample) this causes significant garbage-collection pressure across a multi-sample cohort.
           blockingQueue.put(executor.submit(() -> BedUtils.loadSpecificRegions(mosDepthResultFile,
                                                                                ucscRegions)));
         }
@@ -154,6 +162,9 @@ class MosdepthUtils {
   private static void setColumnData(RealMatrix dm, int col, String inputFile,
                                     List<BEDFeature> features, Logger log) {
 
+    // TODO (future work): Replace positional row iteration with a coordinate-keyed lookup
+    // (Map<String, Integer> regionToRowMap) so that a missing or reordered bin in any sample's
+    // mosdepth file does not silently assign coverage to the wrong genomic row in the matrix.
     for (int row = 0; row < features.size(); row++) {
       // mosdepth coverage parsed to "name" by htsjdk
       try {
