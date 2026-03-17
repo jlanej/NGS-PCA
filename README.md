@@ -41,13 +41,13 @@ The parameters below reflect those used in a real-world run of **142,000 samples
 
 ### On HPC with Apptainer (recommended)
 
-Pull the pre-built image and run directly — no Java or Maven installation required:
+Pull the pre-built image and run directly — no Java or Maven installation required. Exclusion BED files are bundled inside the image at `/app/resources/`:
 
 ```bash
 apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
 
 numPC=500
-bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+bedExclude=/app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 iters=10
 oversample=0
 
@@ -66,11 +66,13 @@ apptainer run \
 
 ### Download pre-built JAR
 
-Pre-built fat JARs are published automatically by GitHub Actions on every tagged release. Download the latest `ngspca-vX.Y.jar` from the [Releases page](https://github.com/jlanej/NGS-PCA/releases), then run:
+Pre-built fat JARs are published automatically by GitHub Actions on every tagged release. Download the latest `ngspca-vX.Y.jar` from the [Releases page](https://github.com/jlanej/NGS-PCA/releases). Exclusion BED files are provided in the `resources/` directory of this repository — clone or download the repo alongside the JAR:
 
 ```bash
+git clone https://github.com/jlanej/NGS-PCA.git
+
 numPC=500
-bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+bedExclude=NGS-PCA/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 iters=10
 oversample=0
 
@@ -95,7 +97,7 @@ cd NGS-PCA
 mvn -B package --file ngspca/pom.xml
 
 numPC=500
-bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+bedExclude=resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 iters=10
 oversample=0
 
