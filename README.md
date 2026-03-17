@@ -37,6 +37,8 @@ find "$dirOfBams" -type f -name "*.bam" \
 
 ## Step 2: Run NGS-PCA
 
+The parameters below reflect those used in a real-world run of **142,000 samples** on a `ram2t` node (1800 GB RAM, 120 threads, ~60 hours walltime). Adjust memory (`-Xmx`), `-threads`, `-numPC`, and other parameters to match your cohort size and available resources. The defaults are more conservative (see table below).
+
 ### On HPC with Apptainer (recommended)
 
 Pull the pre-built image and run directly — no Java or Maven installation required:
@@ -44,18 +46,22 @@ Pull the pre-built image and run directly — no Java or Maven installation requ
 ```bash
 apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
 
-apptainer run \
+numPC=500
+bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+iters=10
+oversample=0
+
+/usr/bin/time -v apptainer run \
   --bind /path/to/data:/data \
   ngs-pca.sif \
   -input /data/input.files.txt \
   -outputDir /data/ngsPCA/ \
-  -numPC 100 \
+  -numPC $numPC \
   -sampleEvery 0 \
-  -threads 24 \
-  -iters 40 \
-  -randomSeed 42 \
-  -oversample 100 \
-  -bedExclude /data/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+  -threads 120 \
+  -bedExclude $bedExclude \
+  -iters $iters \
+  -oversample $oversample
 ```
 
 ### Download pre-built JAR
@@ -63,16 +69,20 @@ apptainer run \
 Pre-built fat JARs are published automatically by GitHub Actions on every tagged release. Download the latest `ngspca-vX.Y.jar` from the [Releases page](https://github.com/jlanej/NGS-PCA/releases), then run:
 
 ```bash
-java -Xmx60G -jar ngspca-vX.Y.jar \
+numPC=500
+bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+iters=10
+oversample=0
+
+/usr/bin/time -v java -Xmx1800G -jar ngspca-vX.Y.jar \
   -input /path/to/mosdepthOutput/ \
   -outputDir /path/to/ngsPCA/ \
-  -numPC 100 \
+  -numPC $numPC \
   -sampleEvery 0 \
-  -threads 24 \
-  -iters 40 \
-  -randomSeed 42 \
-  -oversample 100 \
-  -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+  -threads 120 \
+  -bedExclude $bedExclude \
+  -iters $iters \
+  -oversample $oversample
 ```
 
 ### Building from source
@@ -84,19 +94,21 @@ git clone https://github.com/jlanej/NGS-PCA.git
 cd NGS-PCA
 mvn -B package --file ngspca/pom.xml
 
-java -Xmx60G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+numPC=500
+bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+iters=10
+oversample=0
+
+/usr/bin/time -v java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
   -input /path/to/mosdepthOutput/ \
   -outputDir /path/to/ngsPCA/ \
-  -numPC 100 \
+  -numPC $numPC \
   -sampleEvery 0 \
-  -threads 24 \
-  -iters 40 \
-  -randomSeed 42 \
-  -oversample 100 \
-  -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+  -threads 120 \
+  -bedExclude $bedExclude \
+  -iters $iters \
+  -oversample $oversample
 ```
-
-The above examples use production-scale parameters; the defaults are more conservative (see table below).
 
 ### Key parameters
 
