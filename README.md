@@ -96,7 +96,31 @@ java -Xmx60G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
   -bedExclude ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 ```
 
-The above examples use production-scale parameters; the defaults are more conservative (see table below).
+The above examples use large-cohort parameters; the defaults are more conservative (see table below).
+
+### Real-world scale example
+
+NGS-PCA has been run successfully on **142,000 samples** on a `ram2t` node (60 hours walltime, 1800 GB RAM, 120 threads):
+
+```bash
+jar=/path/to/ngspca.jar
+input=/path/to/mosdepthOutput/
+outputDir=/path/to/ngsPCA/
+numPC=500
+bedExclude=/NGS-PCA/resources/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed
+iters=10
+oversample=0
+
+/usr/bin/time -v java -Xmx1800G -jar $jar \
+  -input $input \
+  -outputDir $outputDir \
+  -numPC $numPC \
+  -sampleEvery 0 \
+  -threads 120 \
+  -bedExclude $bedExclude \
+  -iters $iters \
+  -oversample $oversample
+```
 
 ### Key parameters
 
