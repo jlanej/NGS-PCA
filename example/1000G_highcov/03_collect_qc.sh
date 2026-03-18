@@ -100,14 +100,19 @@ parse_bas_file() {
       total  = (total_col  > 0) ? $total_col  : "NA"
       mapped = (mapped_col > 0) ? $mapped_col : "NA"
       dup    = (dup_col    > 0) ? $dup_col    : "NA"
-      pct_mapped = (total != "NA" && total > 0 && mapped != "NA") \
-                   ? mapped / total * 100 : "NA"
-      pct_dup    = (mapped != "NA" && mapped > 0 && dup != "NA") \
-                   ? dup / mapped * 100 : "NA"
-      printf "%.4f\t%.4f\t%s\n",
-        (pct_mapped != "NA") ? pct_mapped : 0,
-        (pct_dup    != "NA") ? pct_dup    : 0,
-        total
+      if (total != "NA" && total > 0 && mapped != "NA") {
+        pct_mapped = mapped / total * 100
+        fmt_mapped = sprintf("%.4f", pct_mapped)
+      } else {
+        fmt_mapped = "NA"
+      }
+      if (mapped != "NA" && mapped > 0 && dup != "NA") {
+        pct_dup = dup / mapped * 100
+        fmt_dup = sprintf("%.4f", pct_dup)
+      } else {
+        fmt_dup = "NA"
+      }
+      printf "%s\t%s\t%s\n", fmt_mapped, fmt_dup, total
     }
   ' "${bas_file}"
 }
@@ -206,8 +211,8 @@ echo ""
 echo " Preview (first 3 data rows):"
 head -4 "${OUT_TSV}" | column -t -s$'\t'
 echo ""
-echo " To join with NGS-PCA results:"
-printf "   join -t $'\\t' -1 1 -2 1 \\\n"
+echo " To join with NGS-PCA results (use a literal tab for -t):"
+echo "   join -t \$'\\t' -1 1 -2 1 \\"
 echo "     <(sort ${OUT_TSV}) \\"
 echo "     <(sort ${NGSPCA_OUTPUT}/svd.pcs.txt) \\"
 echo "     > ${QC_OUTPUT}/pcs_with_qc.tsv"
