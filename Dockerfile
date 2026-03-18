@@ -1,10 +1,10 @@
-FROM maven:3.6.3-openjdk-11 AS build
+FROM maven:3.9-eclipse-temurin-11 AS build
 WORKDIR /app/ngspca
 COPY ngspca/pom.xml .
 COPY ngspca/src ./src
 RUN mvn install
 
-FROM maven:3.6.3-openjdk-11
+FROM eclipse-temurin:11-jre-jammy
 WORKDIR /app
 
 # --- Bundled tools for end-to-end 1000G high-coverage pipeline -----------
@@ -26,11 +26,11 @@ RUN apt-get update -qq && \
     ln -sf /root/.aspera/connect/bin/ascp /usr/local/bin/ascp && \
     rm -rf /tmp/* /var/lib/apt/lists/*
 
-ENV ASPERA_SSH_KEY=/root/.aspera/connect/etc/asperaweb_id_dsa.openssh
+ENV ASPERA_SSH_KEY="/root/.aspera/connect/etc/asperaweb_id_dsa.openssh"
 
 # --- NGS-PCA application ------------------------------------------------
 
 COPY --from=build /app/ngspca/target/ngspca-0.02-SNAPSHOT.jar /app
 COPY resources /app/resources
-ENV JAVA_TOOL_OPTIONS "-XX:+UseContainerSupport -XX:MaxRAMPercentage=90.0"
+ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=90.0"
 ENTRYPOINT ["java", "-jar","ngspca-0.02-SNAPSHOT.jar"]
