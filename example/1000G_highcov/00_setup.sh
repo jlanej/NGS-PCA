@@ -116,7 +116,8 @@ else
   echo -e "SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5" > "${MANIFEST}"
   grep -v '^#' "${INDEX_FILE}" | while IFS=$'\t' read -r cram cram_md5 crai _ _ _; do
     [[ -z "${cram}" ]] && continue
-    # Fix single-slash FTP URLs
+    # The IGSR index stores URLs with a single slash: "ftp:/ftp.1000genomes..."
+    # Fix to standard double-slash: "ftp://ftp.1000genomes..."
     cram_url="${cram/ftp:\/ftp./ftp:\/\/ftp.}"
     crai_url="${crai/ftp:\/ftp./ftp:\/\/ftp.}"
     # Extract sample ID from the CRAM filename

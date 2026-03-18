@@ -73,6 +73,8 @@ download_aspera() {
   local ftp_url="$1"
   local dest="$2"
   local aspera_path
+  # Strip the FTP server prefix to get the Aspera-compatible remote path
+  # e.g. "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/..." → "vol1/ftp/..."
   aspera_path="${ftp_url//ftp:\/\/ftp.1000genomes.ebi.ac.uk\//}"
   apptainer exec \
     --bind "${CRAM_DIR}":/download \
