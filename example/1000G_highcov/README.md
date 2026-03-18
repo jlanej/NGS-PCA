@@ -10,13 +10,14 @@ Fully reproducible pipeline for computing ~200 coverage-based principal componen
 
 ## Overview
 
-The pipeline has three stages, each implemented as a standalone script that can be submitted to a SLURM-based HPC scheduler:
+The pipeline has four stages, each implemented as a standalone script that can be submitted to a SLURM-based HPC scheduler:
 
 | Stage | Script | What it does | SLURM type |
 |-------|--------|-------------|------------|
-| **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest | Interactive / login node |
-| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera → run mosdepth → remove CRAM | Array job (3,202 tasks) |
+| **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
+| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM + BAS via Aspera → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
+| **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
 
 All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:latest`), which bundles:
 
@@ -59,6 +60,9 @@ sbatch 01_download_and_mosdepth.sh
 
 # 4. Once all 3,202 tasks finish, submit the NGS-PCA job
 sbatch 02_run_ngspca.sh
+
+# 5. Collect QC metrics for batch-effect overlay
+bash 03_collect_qc.sh
 ```
 
 ---
@@ -198,6 +202,72 @@ All output is written to `$WORK_DIR/ngspca_output/`:
 | `svd.singularvalues.txt` | 200 singular values |
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers (in row order of `svd.pcs.txt`) |
+
+### Step 3: Collect QC metrics for batch-effect overlay
+
+```bash
+bash 03_collect_qc.sh
+```
+
+This script aggregates three sources of publicly available (or already-computed) QC into a single table — `$WORK_DIR/qc_output/sample_qc.tsv` — that can be directly overlaid on PCA plots to demonstrate which batch effects are captured by each PC.
+
+#### Available QC metrics
+
+| Metric | Source | How obtained |
+|---|---|---|
+| **Mean autosomal coverage** | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
+| **X coverage ratio** (X/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
+| **Y coverage ratio** (Y/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
+| **Inferred sex** (M/F from coverage) | Derived from X/Y ratios | Free — derived automatically |
+| **% mapped reads** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
+| **Duplication rate** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
+| **Total sequenced bases** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
+| **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
+| **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
+| **Reported sex** | IGSR sample panel | Downloaded once during setup |
+
+The `.bam.bas` files are hosted on the EBI FTP alongside each CRAM (listed in the IGSR alignment index) and contain Picard-equivalent per-sample statistics generated as part of the original NYGC alignment pipeline (Byrska-Bishop et al. 2022, Cell). They are tiny (~few KB each) and are downloaded automatically during step 1.
+
+#### Output table columns
+
+```
+SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX
+PCT_MAPPED  PCT_DUPLICATE  TOTAL_BASES  POPULATION  SUPERPOPULATION  REPORTED_SEX
+```
+
+#### Joining QC with PCA results
+
+```bash
+# Join the QC table with PCA scores on SAMPLE_ID
+join -t $'\t' -1 1 -2 1 \
+  <(sort $WORK_DIR/qc_output/sample_qc.tsv) \
+  <(sort $WORK_DIR/ngspca_output/svd.pcs.txt) \
+  > $WORK_DIR/qc_output/pcs_with_qc.tsv
+```
+
+The merged table can then be used in R, Python, or any plotting tool to color PCA scatter plots by any QC metric. For example, in R:
+
+```r
+library(ggplot2)
+d <- read.table("pcs_with_qc.tsv", header = TRUE, sep = "\t")
+
+# Color by superpopulation (population stratification on PC1/PC2)
+ggplot(d, aes(PC1, PC2, color = SUPERPOPULATION)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by superpopulation")
+
+# Color by mean coverage (sequencing depth batch effect)
+ggplot(d, aes(PC1, PC2, color = MEAN_AUTOSOMAL_COV)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  scale_color_viridis_c() +
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by mean coverage")
+
+# Color by duplication rate (library quality batch effect)
+ggplot(d, aes(PC1, PC2, color = PCT_DUPLICATE)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  scale_color_viridis_c() +
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by duplication rate")
+```
 
 ---
 

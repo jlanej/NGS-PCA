@@ -17,6 +17,8 @@ set -euo pipefail
 WORK_DIR="${WORK_DIR:-/scratch/${USER}/1000G_highcov}"
 CRAM_DIR="${CRAM_DIR:-${WORK_DIR}/crams}"
 MOSDEPTH_DIR="${MOSDEPTH_DIR:-${WORK_DIR}/mosdepth_output}"
+BAS_DIR="${BAS_DIR:-${WORK_DIR}/bas_files}"   # per-sample Picard-equivalent QC
+QC_OUTPUT="${QC_OUTPUT:-${WORK_DIR}/qc_output}"
 NGSPCA_OUTPUT="${NGSPCA_OUTPUT:-${WORK_DIR}/ngspca_output}"
 LOG_DIR="${LOG_DIR:-${WORK_DIR}/logs}"
 
@@ -34,6 +36,10 @@ REF_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_ref
 INDEX_URL="https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
 INDEX_FILE="${INDEX_FILE:-${WORK_DIR}/1000genomes.high_coverage.GRCh38DH.alignment.index}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
+
+# IGSR sample panel — population, superpopulation, reported sex (publicly available)
+PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped"
+PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 
 # EBI Aspera settings (high-speed FASP transfers)
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data

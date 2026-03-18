@@ -48,6 +48,7 @@ SAMPLE_ID=$(echo "${LINE}" | cut -f1)
 CRAM_FTP_URL=$(echo "${LINE}" | cut -f2)
 CRAI_FTP_URL=$(echo "${LINE}" | cut -f3)
 CRAM_MD5=$(echo "${LINE}" | cut -f4)
+BAS_FTP_URL=$(echo "${LINE}" | cut -f5)
 
 echo "============================================================"
 echo " Task ${SLURM_ARRAY_TASK_ID}: ${SAMPLE_ID}"
@@ -160,8 +161,29 @@ if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
 fi
 echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
 
-# ── Stage 3: Clean up CRAM/CRAI ─────────────────────────────────────────────
-echo "[3/3] Cleaning up downloaded CRAM/CRAI..."
+# ── Stage 3: Download BAS file (per-sample QC stats, ~KB) ───────────────────
+# The BAS file contains Picard-equivalent statistics: mapped reads, duplication
+# rate, mean coverage, etc. It is retained permanently (unlike the CRAM).
+mkdir -p "${BAS_DIR}"
+LOCAL_BAS="${BAS_DIR}/${SAMPLE_ID}.bam.bas"
+
+if [[ -f "${LOCAL_BAS}" ]]; then
+  echo "[3/4] BAS file already present: ${LOCAL_BAS}"
+elif [[ -z "${BAS_FTP_URL}" ]]; then
+  echo "[3/4] No BAS URL in manifest; skipping BAS download."
+else
+  echo "[3/4] Downloading BAS file (per-sample QC)..."
+  if download_aspera "${BAS_FTP_URL}" "${LOCAL_BAS}"; then
+    echo "  Aspera download complete."
+  else
+    echo "  Aspera failed; falling back to wget..."
+    download_wget "${BAS_FTP_URL}" "${LOCAL_BAS}"
+    echo "  wget download complete."
+  fi
+fi
+
+# ── Stage 4: Clean up CRAM/CRAI ─────────────────────────────────────────────
+echo "[4/4] Cleaning up downloaded CRAM/CRAI..."
 rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
 echo "  Removed: ${LOCAL_CRAM}"
 echo "  Removed: ${LOCAL_CRAI}"
