@@ -147,6 +147,10 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers |
 
+## 1000 Genomes 30x high-coverage example
+
+A fully reproducible, end-to-end pipeline for computing ~200 PCs from all **3,202** [1000 Genomes 30x high-coverage WGS samples](https://www.internationalgenome.org/data-portal/data-collection/30x-grch38) is provided in [`example/1000G_highcov/`](example/1000G_highcov/). The pipeline uses SLURM array jobs to download each CRAM via Aspera, compute coverage with mosdepth, and then run NGS-PCA on the full cohort — all through a single container image with no additional software installation. See the [walkthrough](example/1000G_highcov/README.md) for details.
+
 ## Random matrix distribution
 
 This implementation defaults to a **uniform** distribution (`-distribution UNIFORM`); `-distribution GAUSSIAN` is available for strict adherence to the Halko et al. paper. In practice the choice has negligible effect on results when power iterations are used. See [docs/random-matrix-distribution.md](docs/random-matrix-distribution.md) for full details and validation results.

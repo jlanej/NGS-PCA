@@ -9,3 +9,4 @@ target/
 .Rhistory
 */bin
 example/test_output/
+example/test_output_gaussian/
