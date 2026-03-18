@@ -285,7 +285,7 @@ bash 00_setup.sh
 |---|---|---|
 | `WORK_DIR` | `/scratch/$USER/1000G_highcov` | Root working directory |
 | `SIF_IMAGE` | `$WORK_DIR/ngs-pca.sif` | Path to the Apptainer image |
-| `REF_FASTA` | `$WORK_DIR/reference/GRCh38_full_analysis_set_plus_decoy_hlas.fa` | GRCh38 reference genome |
+| `REF_FASTA` | `$WORK_DIR/reference/GRCh38_full_analysis_set_plus_decoy_hla.fa` | GRCh38 reference genome |
 | `MOSDEPTH_BIN_SIZE` | `1000` | Bin size in bp for mosdepth |
 | `MOSDEPTH_THREADS` | `2` | Threads per mosdepth task |
 | `NUM_PC` | `200` | Number of PCs to compute |

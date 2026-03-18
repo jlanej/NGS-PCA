@@ -6,7 +6,8 @@
 # SLURM array job: each task processes one sample from the manifest.
 #   1. Download the CRAM + CRAI from EBI via Aspera (falls back to wget)
 #   2. Run mosdepth to compute 1 kb bin coverage
-#   3. Remove the downloaded CRAM/CRAI to free disk space
+#   3. Download BAS file (per-sample QC stats)
+#   4. Remove the downloaded CRAM/CRAI to free disk space
 #
 # Usage:
 #   # After running 00_setup.sh:
@@ -99,7 +100,7 @@ download_wget() {
 }
 
 if [[ ! -f "${LOCAL_CRAM}" ]]; then
-  echo "[1/3] Downloading CRAM..."
+  echo "[1/4] Downloading CRAM..."
   if download_aspera "${CRAM_FTP_URL}" "${LOCAL_CRAM}"; then
     echo "  Aspera download complete."
   else
@@ -108,7 +109,7 @@ if [[ ! -f "${LOCAL_CRAM}" ]]; then
     echo "  wget download complete."
   fi
 else
-  echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
+  echo "[1/4] CRAM already present: ${LOCAL_CRAM}"
 fi
 
 if [[ ! -f "${LOCAL_CRAI}" ]]; then
@@ -138,7 +139,7 @@ if [[ -n "${CRAM_MD5}" ]]; then
 fi
 
 # ── Stage 2: Run mosdepth ───────────────────────────────────────────────────
-echo "[2/3] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
+echo "[2/4] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
 
 apptainer exec \
   --bind "${CRAM_DIR}":/crams \

@@ -65,7 +65,7 @@ else
   echo "  Source: ${REF_URL}"
 
   # Try Aspera first (fast), fall back to wget
-  ASPERA_REF_PATH="vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hlas.fa"
+  ASPERA_REF_PATH="vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hla.fa"
   if command -v ascp &>/dev/null; then
     echo "  Using Aspera for high-speed download..."
     ascp -i "${ASPERA_SSH_KEY}" \
