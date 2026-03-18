@@ -27,8 +27,8 @@ SIF_IMAGE="${SIF_IMAGE:-${WORK_DIR}/ngs-pca.sif}"
 
 # ── Reference genome (GRCh38, required for CRAM decoding by mosdepth) ───────
 REF_DIR="${REF_DIR:-${WORK_DIR}/reference}"
-REF_FASTA="${REF_FASTA:-${REF_DIR}/GRCh38_full_analysis_set_plus_decoy_hlas.fa}"
-REF_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hlas.fa"
+REF_FASTA="${REF_FASTA:-${REF_DIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa}"
+REF_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hla.fa"
 
 # ── 1000G high-coverage data (3,202 NYGC 30x WGS samples) ──────────────────
 # Official IGSR alignment index — lists every CRAM with its FTP path and MD5.
