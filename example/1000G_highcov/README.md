@@ -23,10 +23,9 @@ All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:lates
 
 - **NGS-PCA** — randomized SVD for coverage PCA
 - **mosdepth** v0.3.9 — fast BAM/CRAM depth calculation
-- **IBM Aspera Connect** — high-speed downloads from EBI (~10–100× faster than FTP)
 - Pre-built **exclusion BED files** for GRCh38
 
-No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity).
+No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads — the pipeline automatically falls back to `wget` if `ascp` is not available.
 
 ---
 
@@ -302,13 +301,25 @@ bash 00_setup.sh
 
 The pipeline downloads data from the EBI 1000 Genomes FTP. Three methods are available (in order of speed):
 
-### 1. Aspera (default, fastest)
+### 1. Aspera (optional, fastest)
 
-[IBM Aspera Connect](https://www.ibm.com/products/aspera) is bundled in the container image. It uses the FASP protocol for high-speed transfers that are typically 10–100× faster than FTP/HTTP.
+[IBM Aspera Connect](https://www.ibm.com/products/aspera/downloads) uses the FASP protocol for high-speed transfers typically 10–100× faster than FTP/HTTP. Install it on your HPC system or load it as a module:
 
 ```bash
-# Inside the container:
-ascp -i /root/.aspera/connect/etc/asperaweb_id_dsa.openssh \
+# Common HPC module names (varies by site):
+module load aspera-connect
+module load ibm-aspera-connect
+
+# Or install to your home directory from IBM:
+# https://www.ibm.com/products/aspera/downloads
+```
+
+When `ascp` is on `PATH` and `ASPERA_SSH_KEY` points to a valid key, the pipeline uses it automatically for all downloads. If `ascp` is not found, the pipeline falls back to `wget` without any manual intervention.
+
+```bash
+# The EBI Aspera key is bundled with Aspera Connect at:
+# $HOME/.aspera/connect/etc/asperaweb_id_dsa.openssh
+ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
   -Tr -Q -l 300m -P33001 -L- \
   fasp-g1k@fasp.1000genomes.ebi.ac.uk:vol1/ftp/data_collections/1000_genomes_project/data/CHS/HG00419/high_cov_alignment/HG00419.alt_bwamem_GRCh38DH.20150917.CHS.high_coverage.cram \
   ./

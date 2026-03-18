@@ -68,7 +68,7 @@ LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
 LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
 
 download_aspera() {
-  # Convert FTP URL to Aspera path and download to CRAM_DIR.
+  # Convert FTP URL to Aspera path and download using system ascp.
   #   ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/... → vol1/ftp/...
   # ascp saves with the original remote filename; caller renames as needed.
   local ftp_url="$1"
@@ -77,13 +77,12 @@ download_aspera() {
   # Strip the FTP server prefix to get the Aspera-compatible remote path
   # e.g. "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/..." → "vol1/ftp/..."
   aspera_path="${ftp_url//ftp:\/\/ftp.1000genomes.ebi.ac.uk\//}"
-  apptainer exec \
-    --bind "${CRAM_DIR}":/download \
-    "${SIF_IMAGE}" \
-    ascp -i "${ASPERA_SSH_KEY}" \
-      -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
-      "${EBI_ASPERA_USER}:${aspera_path}" \
-      /download/
+  # Use system ascp (install Aspera Connect on your HPC or load it as a module)
+  command -v ascp &>/dev/null || return 1
+  ascp -i "${ASPERA_SSH_KEY}" \
+    -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
+    "${EBI_ASPERA_USER}:${aspera_path}" \
+    "${CRAM_DIR}/"
   # Rename to the desired local filename if it differs from the remote name
   local remote_basename
   remote_basename="$(basename "${aspera_path}")"

@@ -46,7 +46,7 @@ echo "  Done."
 if [[ -f "${SIF_IMAGE}" ]]; then
   echo "[2/5] Container image already exists: ${SIF_IMAGE}  (skipping pull)"
 else
-  echo "[2/5] Pulling NGS-PCA container image (includes mosdepth + ascp)..."
+  echo "[2/5] Pulling NGS-PCA container image (includes mosdepth)..."
   echo "  apptainer pull ${SIF_IMAGE} docker://ghcr.io/jlanej/ngs-pca:latest"
   apptainer pull "${SIF_IMAGE}" docker://ghcr.io/jlanej/ngs-pca:latest
   echo "  Done."
@@ -55,7 +55,6 @@ fi
 # Verify bundled tools
 echo "  Verifying bundled tools..."
 apptainer exec "${SIF_IMAGE}" mosdepth --version || echo "  WARNING: mosdepth not found in image"
-apptainer exec "${SIF_IMAGE}" ascp --version 2>&1 | head -1 || echo "  WARNING: ascp not found in image"
 echo ""
 
 # ── 3. Download reference genome ────────────────────────────────────────────
@@ -67,18 +66,15 @@ else
 
   # Try Aspera first (fast), fall back to wget
   ASPERA_REF_PATH="vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hlas.fa"
-  if apptainer exec "${SIF_IMAGE}" ascp --version &>/dev/null; then
+  if command -v ascp &>/dev/null; then
     echo "  Using Aspera for high-speed download..."
-    apptainer exec \
-      --bind "${REF_DIR}":/download \
-      "${SIF_IMAGE}" \
-      ascp -i "${ASPERA_SSH_KEY}" \
-        -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
-        "${EBI_ASPERA_USER}:${ASPERA_REF_PATH}" \
-        /download/ || {
-          echo "  Aspera failed; falling back to wget..."
-          wget -O "${REF_FASTA}" "${REF_URL}"
-        }
+    ascp -i "${ASPERA_SSH_KEY}" \
+      -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
+      "${EBI_ASPERA_USER}:${ASPERA_REF_PATH}" \
+      "${REF_DIR}/" || {
+        echo "  Aspera failed; falling back to wget..."
+        wget -O "${REF_FASTA}" "${REF_URL}"
+      }
   else
     echo "  Using wget..."
     wget -O "${REF_FASTA}" "${REF_URL}"

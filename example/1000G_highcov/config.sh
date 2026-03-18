@@ -41,10 +41,12 @@ MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
 PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped"
 PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 
-# EBI Aspera settings (high-speed FASP transfers)
+# EBI Aspera settings (high-speed FASP transfers — requires system ascp)
+# Install Aspera Connect from https://www.ibm.com/products/aspera/downloads
+# or load it as an HPC module: module load aspera-connect
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data
 EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
-ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-/root/.aspera/connect/etc/asperaweb_id_dsa.openssh}"
+ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh}"
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
 
