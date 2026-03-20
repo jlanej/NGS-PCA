@@ -23,7 +23,7 @@
 #SBATCH --job-name=1kG_mosdepth
 #SBATCH --output=logs/mosdepth_%A_%a.out
 #SBATCH --error=logs/mosdepth_%A_%a.err
-#SBATCH --array=1-3202%25
+#SBATCH --array=1-3202%200
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=04:00:00

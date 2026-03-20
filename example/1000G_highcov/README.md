@@ -118,11 +118,11 @@ This script performs four tasks:
 sbatch 01_download_and_mosdepth.sh
 ```
 
-This is a SLURM array job (`--array=1-3202%25` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
+This is a SLURM array job (`--array=1-3202%200` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
 
 ```bash
-# Conservative throttling: max 25 concurrent tasks (default)
-sbatch --array=1-3202%25 01_download_and_mosdepth.sh
+# Recommended throttling: max 200 concurrent tasks (default)
+sbatch --array=1-3202%200 01_download_and_mosdepth.sh
 
 # Batch 4 samples per task + throttle to 20 concurrent tasks
 export SAMPLES_PER_TASK=4

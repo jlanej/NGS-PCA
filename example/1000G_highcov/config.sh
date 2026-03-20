@@ -61,7 +61,7 @@ EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 SAMPLES_PER_TASK="${SAMPLES_PER_TASK:-1}"
 # Recommended max number of concurrently running array tasks when submitting:
 #   sbatch --array=1-N%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh
-MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-25}"
+MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-200}"
 
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"

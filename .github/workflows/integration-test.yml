@@ -7,6 +7,61 @@ on:
   workflow_dispatch:
 
 jobs:
+  highcov-setup-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate 1000G setup manifest sample count
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          TEST_WORK="${RUNNER_TEMP}/highcov_setup_test"
+          mkdir -p "${TEST_WORK}/reference"
+          touch "${TEST_WORK}/ngs-pca.sif" "${TEST_WORK}/reference/ref.fa" "${TEST_WORK}/igsr_sample_panel.ped"
+
+          INDEX_FILE_PATH="${TEST_WORK}/1000genomes.high_coverage.GRCh38DH.alignment.index"
+          python3 - "${INDEX_FILE_PATH}" <<'PY'
+          import sys
+          from pathlib import Path
+
+          out = Path(sys.argv[1])
+          out.parent.mkdir(parents=True, exist_ok=True)
+          with out.open("w", encoding="utf-8") as f:
+              for i in range(1, 3203):
+                  sample = f"HG{i:05d}"
+                  base = (
+                      "ftp:/ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/"
+                      f"1000_genomes_project/data/TST/{sample}/high_cov_alignment/{sample}"
+                  )
+                  cram = f"{base}.alt_bwamem_GRCh38DH.20150917.TST.high_coverage.cram"
+                  crai = f"{cram}.crai"
+                  bas = f"{base}.bam.bas"
+                  f.write(f"{cram}\t{'a'*32}\t{crai}\t.\t{bas}\t.\n")
+          PY
+
+          WORK_DIR="${TEST_WORK}" \
+          SIF_IMAGE="${TEST_WORK}/ngs-pca.sif" \
+          REF_DIR="${TEST_WORK}/reference" \
+          REF_FASTA="${TEST_WORK}/reference/ref.fa" \
+          INDEX_FILE="${INDEX_FILE_PATH}" \
+          MANIFEST="${TEST_WORK}/manifest.tsv" \
+          PANEL_FILE="${TEST_WORK}/igsr_sample_panel.ped" \
+          MIN_MANIFEST_SAMPLES=3000 \
+          EXPECTED_MANIFEST_SAMPLES=3202 \
+          bash 00_setup.sh
+
+          SAMPLE_COUNT=$(tail -n +2 "${TEST_WORK}/manifest.tsv" | wc -l)
+          echo "Manifest sample count: ${SAMPLE_COUNT}"
+          if (( SAMPLE_COUNT < 3000 )); then
+            echo "::error::Manifest has only ${SAMPLE_COUNT} samples (minimum expected: 3000)."
+            exit 1
+          fi
+
   integration-test:
     runs-on: ubuntu-latest
     permissions:
