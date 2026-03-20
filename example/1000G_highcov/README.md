@@ -118,7 +118,20 @@ This script performs four tasks:
 sbatch 01_download_and_mosdepth.sh
 ```
 
-This is a SLURM array job (`--array=1-3202`). Each task processes one sample:
+This is a SLURM array job (`--array=1-3202%25` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
+
+```bash
+# Conservative throttling: max 25 concurrent tasks (default)
+sbatch --array=1-3202%25 01_download_and_mosdepth.sh
+
+# Batch 4 samples per task + throttle to 20 concurrent tasks
+export SAMPLES_PER_TASK=4
+TOTAL_SAMPLES=$(tail -n +2 "$WORK_DIR/manifest.tsv" | wc -l)
+TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
+sbatch --array=1-${TOTAL_TASKS}%20 01_download_and_mosdepth.sh
+```
+
+Each sample in the task is still processed sequentially as:
 
 1. **Download** the CRAM and CRAI from EBI using **Aspera** (`ascp`) for high-speed transfer, falling back to `wget` if Aspera fails. Aspera typically achieves 10–100× faster transfers than FTP.
 
@@ -373,8 +386,9 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | `mosdepth: error: could not load index` | Ensure the CRAI file was downloaded alongside the CRAM. |
 | `OutOfMemoryError` in step 02 | Increase `--mem` in the SLURM directive and/or set `-Xmx` via `JAVA_TOOL_OPTIONS`. |
 | Fewer than 3,202 mosdepth files | Re-run `sbatch --array=<missing_ids> 01_download_and_mosdepth.sh` for failed tasks. |
-| `Array task ... exceeds manifest size` | Your array range exceeds manifest size. Regenerate/validate manifest with `bash 00_setup.sh`, then submit `sbatch --array=1-$(tail -n +2 $WORK_DIR/manifest.tsv \| wc -l) 01_download_and_mosdepth.sh`. |
+| `Array task ... exceeds task count` | Recompute task count from manifest + batching and resubmit: `TOTAL_SAMPLES=$(tail -n +2 $WORK_DIR/manifest.tsv \| wc -l); TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK )); sbatch --array=1-${TOTAL_TASKS}%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh` |
 | Manifest is empty or has too few samples | Re-download the IGSR index: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
+| First ~25–30 tasks run, then many download failures | This is often remote/network connection saturation. Keep `%` throttling on array submissions (for example `%10` to `%30`) and/or increase `SAMPLES_PER_TASK` to reduce concurrent Aspera/wget sessions. |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
 
 ---

@@ -3,7 +3,7 @@
 # 01_download_and_mosdepth.sh — Download CRAM, run mosdepth, clean up
 # =============================================================================
 #
-# SLURM array job: each task processes one sample from the manifest.
+# SLURM array job: each task processes one or more samples from the manifest.
 #   1. Download the CRAM + CRAI from EBI via Aspera (falls back to wget)
 #   2. Run mosdepth to compute 1 kb bin coverage
 #   3. Download BAS file (per-sample QC stats)
@@ -23,7 +23,7 @@
 #SBATCH --job-name=1kG_mosdepth
 #SBATCH --output=logs/mosdepth_%A_%a.out
 #SBATCH --error=logs/mosdepth_%A_%a.err
-#SBATCH --array=1-3202
+#SBATCH --array=1-3202%25
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=04:00:00
@@ -53,6 +53,10 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   echo "ERROR: SLURM_ARRAY_TASK_ID is not set. Submit this script as a SLURM array job."
   exit 1
 fi
+if (( SAMPLES_PER_TASK < 1 )); then
+  echo "ERROR: SAMPLES_PER_TASK must be >= 1 (got: ${SAMPLES_PER_TASK})."
+  exit 1
+fi
 
 if [[ ! -s "${MANIFEST}" ]]; then
   echo "ERROR: Manifest missing or empty: ${MANIFEST}"
@@ -70,51 +74,17 @@ fi
 if (( TOTAL_SAMPLES != EXPECTED_MANIFEST_SAMPLES )); then
   echo "WARNING: Manifest has ${TOTAL_SAMPLES} samples (expected ${EXPECTED_MANIFEST_SAMPLES})."
 fi
-if (( SLURM_ARRAY_TASK_ID > TOTAL_SAMPLES )); then
-  echo "ERROR: Array task ${SLURM_ARRAY_TASK_ID} exceeds manifest size (${TOTAL_SAMPLES} samples)."
-  echo "Submit with a bounded array, e.g.: sbatch --array=1-${TOTAL_SAMPLES} 01_download_and_mosdepth.sh"
+TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
+if (( SLURM_ARRAY_TASK_ID > TOTAL_TASKS )); then
+  echo "ERROR: Array task ${SLURM_ARRAY_TASK_ID} exceeds task count (${TOTAL_TASKS}) for ${TOTAL_SAMPLES} samples (SAMPLES_PER_TASK=${SAMPLES_PER_TASK})."
+  echo "Submit with: sbatch --array=1-${TOTAL_TASKS}%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh"
   exit 1
 fi
 
-# ── Resolve the sample for this array task ───────────────────────────────────
-# SLURM_ARRAY_TASK_ID is 1-based; manifest line 1 is the header.
-LINE_NUM=$(( SLURM_ARRAY_TASK_ID + 1 ))
-LINE=$(sed -n "${LINE_NUM}p" "${MANIFEST}")
-
-if [[ -z "${LINE}" ]]; then
-  echo "ERROR: No manifest entry for task ${SLURM_ARRAY_TASK_ID} (line ${LINE_NUM})"
-  exit 1
-fi
-
-# Parse tab-separated manifest columns in one pass (preserves empty trailing BAS field).
-IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL _ <<< "${LINE}"
-
-if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
-  echo "ERROR: Manifest entry at line ${LINE_NUM} is missing required columns."
-  exit 1
-fi
-if [[ "${CRAM_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* || "${CRAI_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* ]]; then
-  echo "ERROR: Manifest entry at line ${LINE_NUM} has unsupported CRAM/CRAI source."
-  echo "  CRAM: ${CRAM_FTP_URL}"
-  echo "  CRAI: ${CRAI_FTP_URL}"
-  exit 1
-fi
-
-echo "============================================================"
-echo " Task ${SLURM_ARRAY_TASK_ID}: ${SAMPLE_ID}"
-echo " CRAM: ${CRAM_FTP_URL}"
-echo " Started: $(date)"
-echo "============================================================"
-
-# ── Skip if mosdepth output already exists ───────────────────────────────────
-MOSDEPTH_OUTPUT="${MOSDEPTH_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
-LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
-LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
-if [[ -f "${MOSDEPTH_OUTPUT}" ]]; then
-  echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
-  # Clean up any leftover CRAM/CRAI from a previous partial run to free disk space
-  rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-  exit 0
+TASK_START=$(( (SLURM_ARRAY_TASK_ID - 1) * SAMPLES_PER_TASK + 1 ))
+TASK_END=$(( TASK_START + SAMPLES_PER_TASK - 1 ))
+if (( TASK_END > TOTAL_SAMPLES )); then
+  TASK_END=${TOTAL_SAMPLES}
 fi
 
 # ── Stage 1: Download CRAM + CRAI ───────────────────────────────────────────
@@ -157,97 +127,141 @@ download_wget() {
   fi
 }
 
-if [[ ! -f "${LOCAL_CRAM}" ]]; then
-  echo "[1/4] Downloading CRAM..."
-  if download_aspera "${CRAM_FTP_URL}" "${LOCAL_CRAM}"; then
-    echo "  Aspera download complete."
-  else
-    echo "  Aspera failed; falling back to wget..."
-    download_wget "${CRAM_FTP_URL}" "${LOCAL_CRAM}"
-    echo "  wget download complete."
+process_manifest_line() {
+  local line_num="$1"
+  local line
+  line=$(sed -n "${line_num}p" "${MANIFEST}")
+  if [[ -z "${line}" ]]; then
+    echo "ERROR: No manifest entry for line ${line_num}"
+    return 1
   fi
-else
-  echo "[1/4] CRAM already present: ${LOCAL_CRAM}"
-fi
 
-if [[ ! -f "${LOCAL_CRAI}" ]]; then
-  echo "  Downloading CRAI..."
-  if download_aspera "${CRAI_FTP_URL}" "${LOCAL_CRAI}"; then
-    echo "  Aspera download complete."
-  else
-    echo "  Aspera failed; falling back to wget..."
-    download_wget "${CRAI_FTP_URL}" "${LOCAL_CRAI}"
-    echo "  wget download complete."
+  local SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL
+  # Parse tab-separated manifest columns in one pass (preserves empty trailing BAS field).
+  IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL _ <<< "${line}"
+  if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
+    echo "ERROR: Manifest entry at line ${line_num} is missing required columns."
+    return 1
   fi
-else
-  echo "  CRAI already present: ${LOCAL_CRAI}"
-fi
+  if [[ "${CRAM_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* || "${CRAI_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* ]]; then
+    echo "ERROR: Manifest entry at line ${line_num} has unsupported CRAM/CRAI source."
+    echo "  CRAM: ${CRAM_FTP_URL}"
+    echo "  CRAI: ${CRAI_FTP_URL}"
+    return 1
+  fi
 
-# Optional: verify CRAM MD5
-if [[ -n "${CRAM_MD5}" ]]; then
-  echo "  Verifying CRAM MD5..."
-  ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
-  if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
-    echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
-    echo "  Removing corrupt file and exiting. Re-submit this task to retry."
+  echo "============================================================"
+  echo " Task ${SLURM_ARRAY_TASK_ID}: ${SAMPLE_ID} (manifest line ${line_num})"
+  echo " CRAM: ${CRAM_FTP_URL}"
+  echo " Started: $(date)"
+  echo "============================================================"
+
+  # ── Skip if mosdepth output already exists ─────────────────────────────────
+  MOSDEPTH_OUTPUT="${MOSDEPTH_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
+  LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
+  LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
+  if [[ -f "${MOSDEPTH_OUTPUT}" ]]; then
+    echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
     rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-    exit 1
+    return 0
   fi
-  echo "  MD5 verified."
-fi
 
-# ── Stage 2: Run mosdepth ───────────────────────────────────────────────────
-echo "[2/4] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
-
-apptainer exec \
-  --bind "${CRAM_DIR}":/crams \
-  --bind "${MOSDEPTH_DIR}":/mosdepth \
-  --bind "${REF_DIR}":/ref \
-  "${SIF_IMAGE}" \
-  mosdepth \
-    -n \
-    -t "${MOSDEPTH_THREADS}" \
-    --by "${MOSDEPTH_BIN_SIZE}" \
-    --fasta "/ref/$(basename "${REF_FASTA}")" \
-    "/mosdepth/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}" \
-    "/crams/${SAMPLE_ID}.cram"
-
-# Verify output was created
-if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
-  echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT}"
-  exit 1
-fi
-echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
-
-# ── Stage 3: Download BAS file (per-sample QC stats, ~KB) ───────────────────
-# The BAS file contains Picard-equivalent statistics: mapped reads, duplication
-# rate, mean coverage, etc. It is retained permanently (unlike the CRAM).
-mkdir -p "${BAS_DIR}"
-LOCAL_BAS="${BAS_DIR}/${SAMPLE_ID}.bam.bas"
-
-if [[ -f "${LOCAL_BAS}" ]]; then
-  echo "[3/4] BAS file already present: ${LOCAL_BAS}"
-elif [[ -z "${BAS_FTP_URL}" ]]; then
-  echo "[3/4] No BAS URL in manifest; skipping BAS download."
-else
-  echo "[3/4] Downloading BAS file (per-sample QC)..."
-  if download_aspera "${BAS_FTP_URL}" "${LOCAL_BAS}"; then
-    echo "  Aspera download complete."
+  if [[ ! -f "${LOCAL_CRAM}" ]]; then
+    echo "[1/4] Downloading CRAM..."
+    if download_aspera "${CRAM_FTP_URL}" "${LOCAL_CRAM}"; then
+      echo "  Aspera download complete."
+    else
+      echo "  Aspera failed; falling back to wget..."
+      download_wget "${CRAM_FTP_URL}" "${LOCAL_CRAM}"
+      echo "  wget download complete."
+    fi
   else
-    echo "  Aspera failed; falling back to wget..."
-    download_wget "${BAS_FTP_URL}" "${LOCAL_BAS}"
-    echo "  wget download complete."
+    echo "[1/4] CRAM already present: ${LOCAL_CRAM}"
   fi
-fi
 
-# ── Stage 4: Clean up CRAM/CRAI ─────────────────────────────────────────────
-echo "[4/4] Cleaning up downloaded CRAM/CRAI..."
-rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-echo "  Removed: ${LOCAL_CRAM}"
-echo "  Removed: ${LOCAL_CRAI}"
+  if [[ ! -f "${LOCAL_CRAI}" ]]; then
+    echo "  Downloading CRAI..."
+    if download_aspera "${CRAI_FTP_URL}" "${LOCAL_CRAI}"; then
+      echo "  Aspera download complete."
+    else
+      echo "  Aspera failed; falling back to wget..."
+      download_wget "${CRAI_FTP_URL}" "${LOCAL_CRAI}"
+      echo "  wget download complete."
+    fi
+  else
+    echo "  CRAI already present: ${LOCAL_CRAI}"
+  fi
 
-echo ""
-echo "============================================================"
-echo " Task ${SLURM_ARRAY_TASK_ID} (${SAMPLE_ID}) complete."
-echo " Finished: $(date)"
-echo "============================================================"
+  # Optional: verify CRAM MD5
+  if [[ -n "${CRAM_MD5}" ]]; then
+    echo "  Verifying CRAM MD5..."
+    ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
+    if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
+      echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
+      echo "  Removing corrupt file and exiting. Re-submit this task to retry."
+      rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
+      return 1
+    fi
+    echo "  MD5 verified."
+  fi
+
+  # ── Stage 2: Run mosdepth ─────────────────────────────────────────────────
+  echo "[2/4] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
+
+  apptainer exec \
+    --bind "${CRAM_DIR}":/crams \
+    --bind "${MOSDEPTH_DIR}":/mosdepth \
+    --bind "${REF_DIR}":/ref \
+    "${SIF_IMAGE}" \
+    mosdepth \
+      -n \
+      -t "${MOSDEPTH_THREADS}" \
+      --by "${MOSDEPTH_BIN_SIZE}" \
+      --fasta "/ref/$(basename "${REF_FASTA}")" \
+      "/mosdepth/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}" \
+      "/crams/${SAMPLE_ID}.cram"
+
+  # Verify output was created
+  if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
+    echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT}"
+    return 1
+  fi
+  echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
+
+  # ── Stage 3: Download BAS file (per-sample QC stats, ~KB) ─────────────────
+  mkdir -p "${BAS_DIR}"
+  LOCAL_BAS="${BAS_DIR}/${SAMPLE_ID}.bam.bas"
+
+  if [[ -f "${LOCAL_BAS}" ]]; then
+    echo "[3/4] BAS file already present: ${LOCAL_BAS}"
+  elif [[ -z "${BAS_FTP_URL}" ]]; then
+    echo "[3/4] No BAS URL in manifest; skipping BAS download."
+  else
+    echo "[3/4] Downloading BAS file (per-sample QC)..."
+    if download_aspera "${BAS_FTP_URL}" "${LOCAL_BAS}"; then
+      echo "  Aspera download complete."
+    else
+      echo "  Aspera failed; falling back to wget..."
+      download_wget "${BAS_FTP_URL}" "${LOCAL_BAS}"
+      echo "  wget download complete."
+    fi
+  fi
+
+  # ── Stage 4: Clean up CRAM/CRAI ───────────────────────────────────────────
+  echo "[4/4] Cleaning up downloaded CRAM/CRAI..."
+  rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
+  echo "  Removed: ${LOCAL_CRAM}"
+  echo "  Removed: ${LOCAL_CRAI}"
+
+  echo ""
+  echo "============================================================"
+  echo " Task ${SLURM_ARRAY_TASK_ID} (${SAMPLE_ID}) complete."
+  echo " Finished: $(date)"
+  echo "============================================================"
+}
+
+echo "Task ${SLURM_ARRAY_TASK_ID} will process manifest sample indices ${TASK_START}-${TASK_END} of ${TOTAL_SAMPLES} (SAMPLES_PER_TASK=${SAMPLES_PER_TASK})."
+for SAMPLE_IDX in $(seq "${TASK_START}" "${TASK_END}"); do
+  LINE_NUM=$(( SAMPLE_IDX + 1 ))
+  process_manifest_line "${LINE_NUM}"
+done

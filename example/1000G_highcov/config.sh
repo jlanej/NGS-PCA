@@ -56,6 +56,13 @@ ASPERA_PORT=33001
 # EBI FTP base (fallback for wget/curl)
 EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 
+# ── Download array batching/concurrency controls ────────────────────────────
+# Number of manifest entries processed sequentially by each SLURM array task.
+SAMPLES_PER_TASK="${SAMPLES_PER_TASK:-1}"
+# Recommended max number of concurrently running array tasks when submitting:
+#   sbatch --array=1-N%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh
+MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-25}"
+
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
 MOSDEPTH_THREADS="${MOSDEPTH_THREADS:-2}"
