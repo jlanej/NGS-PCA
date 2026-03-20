@@ -55,8 +55,8 @@ validate_manifest() {
   local invalid
   invalid="$(awk -F'\t' '
     NR==1 {next}
-    NF<5 || $1=="" || $2=="" || $3=="" || $2 !~ /^ftp:\/\/ftp\.1000genomes\.ebi\.ac\.uk\// || $3 !~ /^ftp:\/\/ftp\.1000genomes\.ebi\.ac\.uk\// {print NR; exit}
-  ' "${manifest_file}")"
+    NF<5 || $1=="" || $2=="" || $3=="" || index($2,prefix)!=1 || index($3,prefix)!=1 {print NR; exit}
+  ' prefix="${EXPECTED_FTP_PREFIX}" "${manifest_file}")"
   if [[ -n "${invalid}" ]]; then
     echo "ERROR: Manifest has invalid required fields/CRAM sources at line ${invalid}: ${manifest_file}"
     echo "  Re-run setup to regenerate it:"

@@ -86,13 +86,14 @@ if [[ -z "${LINE}" ]]; then
   exit 1
 fi
 
+# Parse tab-separated manifest columns in one pass (preserves empty trailing BAS field).
 IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL _ <<< "${LINE}"
 
 if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
   echo "ERROR: Manifest entry at line ${LINE_NUM} is missing required columns."
   exit 1
 fi
-if [[ ! "${CRAM_FTP_URL}" =~ ^ftp://ftp\.1000genomes\.ebi\.ac\.uk/ || ! "${CRAI_FTP_URL}" =~ ^ftp://ftp\.1000genomes\.ebi\.ac\.uk/ ]]; then
+if [[ "${CRAM_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* || "${CRAI_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* ]]; then
   echo "ERROR: Manifest entry at line ${LINE_NUM} has unsupported CRAM/CRAI source."
   echo "  CRAM: ${CRAM_FTP_URL}"
   echo "  CRAI: ${CRAI_FTP_URL}"
