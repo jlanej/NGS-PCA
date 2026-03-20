@@ -10,11 +10,12 @@
 #        - Mean autosomal coverage (chr1–22)
 #        - X and Y coverage ratios → inferred genetic sex
 #
-#   2. BAS files (.bam.bas) — per-sample Picard-equivalent stats downloaded
-#      from EBI during step 01 alongside the CRAM.  Provides:
+#   2. BAS files (.bam.bas) — optional Picard-equivalent stats.  If present in
+#      $BAS_DIR, provides:
 #        - % mapped reads
 #        - Duplication rate
 #        - Total sequenced bases
+#      (Not downloaded automatically for NYGC 30x data; columns are NA if absent.)
 #
 #   3. IGSR sample panel (integrated_call_samples_v3.*.ALL.ped) — downloaded
 #      during setup.  Provides:

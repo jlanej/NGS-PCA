@@ -5,9 +5,9 @@
 #
 # This script:
 #   1. Creates the working directory structure
-#   2. Pulls the NGS-PCA container image (includes mosdepth + ascp)
+#   2. Pulls the NGS-PCA container image (includes mosdepth)
 #   3. Downloads the GRCh38 reference genome (required for CRAM decoding)
-#   4. Downloads the official IGSR alignment index and builds a manifest
+#   4. Downloads the NYGC 30x sequence indexes and builds a manifest
 #
 # Prerequisites:
 #   - Apptainer (Singularity) available on the system
@@ -45,17 +45,17 @@ validate_manifest() {
 
   local header
   header="$(head -n1 "${manifest_file}")"
-  if [[ "${header}" != $'SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5\tBAS_FTP_URL' ]]; then
+  if [[ "${header}" != $'SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5' ]]; then
     echo "ERROR: Manifest header is invalid:"
     echo "  got:      ${header}"
-    echo "  expected: SAMPLE_ID<TAB>CRAM_FTP_URL<TAB>CRAI_FTP_URL<TAB>CRAM_MD5<TAB>BAS_FTP_URL"
+    echo "  expected: SAMPLE_ID<TAB>CRAM_FTP_URL<TAB>CRAI_FTP_URL<TAB>CRAM_MD5"
     exit 1
   fi
 
   local invalid
   invalid="$(awk -F'\t' '
     NR==1 {next}
-    NF<5 || $1=="" || $2=="" || $3=="" || index($2,prefix)!=1 || index($3,prefix)!=1 {print NR; exit}
+    NF<4 || $1=="" || $2=="" || $3=="" || index($2,prefix)!=1 || index($3,prefix)!=1 {print NR; exit}
   ' prefix="${EXPECTED_FTP_PREFIX}" "${manifest_file}")"
   if [[ -n "${invalid}" ]]; then
     echo "ERROR: Manifest has invalid required fields/CRAM sources at line ${invalid}: ${manifest_file}"
@@ -70,12 +70,12 @@ validate_manifest() {
     echo "ERROR: Manifest has only ${nfound} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
     echo "  This often means the index download or parse was incomplete."
     echo "  Re-run setup to regenerate it:"
-    echo "    rm -f \"${manifest_file}\" \"${INDEX_FILE}\" && bash 00_setup.sh"
+    echo "    rm -f \"${manifest_file}\" \"${INDEX_FILE_2504}\" \"${INDEX_FILE_698}\" && bash 00_setup.sh"
     exit 1
   fi
   if (( nfound != EXPECTED_MANIFEST_SAMPLES )); then
     echo "WARNING: Manifest has ${nfound} samples (expected ${EXPECTED_MANIFEST_SAMPLES})."
-    echo "  Continuing, but confirm the selected index is up to date."
+    echo "  Continuing, but confirm the selected indexes are up to date."
   fi
 }
 
@@ -83,16 +83,17 @@ echo "============================================================"
 echo " NGS-PCA 1000G High-Coverage Pipeline — Setup"
 echo "============================================================"
 echo ""
-echo " WORK_DIR:      ${WORK_DIR}"
-echo " SIF_IMAGE:     ${SIF_IMAGE}"
-echo " REF_FASTA:     ${REF_FASTA}"
-echo " INDEX_FILE:    ${INDEX_FILE}"
-echo " MANIFEST:      ${MANIFEST}"
+echo " WORK_DIR:        ${WORK_DIR}"
+echo " SIF_IMAGE:       ${SIF_IMAGE}"
+echo " REF_FASTA:       ${REF_FASTA}"
+echo " INDEX (2504):    ${INDEX_FILE_2504}"
+echo " INDEX (698):     ${INDEX_FILE_698}"
+echo " MANIFEST:        ${MANIFEST}"
 echo ""
 
 # ── 1. Create directory structure ────────────────────────────────────────────
 echo "[1/5] Creating directory structure..."
-mkdir -p "${CRAM_DIR}" "${MOSDEPTH_DIR}" "${BAS_DIR}" "${QC_OUTPUT}" "${NGSPCA_OUTPUT}" "${LOG_DIR}" "${REF_DIR}"
+mkdir -p "${CRAM_DIR}" "${MOSDEPTH_DIR}" "${QC_OUTPUT}" "${NGSPCA_OUTPUT}" "${LOG_DIR}" "${REF_DIR}"
 echo "  Done."
 
 # ── 2. Pull the NGS-PCA container image ─────────────────────────────────────
@@ -142,39 +143,60 @@ if [[ ! -f "${REF_FASTA}.fai" ]]; then
   echo "    samtools faidx ${REF_FASTA}"
 fi
 
-# ── 4. Download IGSR index and generate manifest ────────────────────────────
+# ── 4. Download NYGC sequence indexes and generate manifest ─────────────────
+# The NYGC 30x sequence.index files (2504 + 698) use the ENA format:
+#   ENA_FILE_PATH  MD5SUM  RUN_ID  ...  SAMPLE_NAME(col10)  POPULATION(col11) ...
+# ENA_FILE_PATH points to CRAMs on ftp.sra.ebi.ac.uk.
+# CRAI files follow the convention: {CRAM_URL}.crai
 if [[ -f "${MANIFEST}" ]]; then
   echo "[4/5] Manifest already exists: ${MANIFEST}  (skipping generation)"
   validate_manifest "${MANIFEST}"
   NFOUND=$(tail -n +2 "${MANIFEST}" | wc -l)
   echo "  ${NFOUND} samples listed."
 else
-  echo "[4/5] Downloading official IGSR alignment index and building manifest..."
-  echo "  Source: ${INDEX_URL}"
+  echo "[4/5] Downloading NYGC 30x sequence indexes and building manifest..."
 
-  # Download the index file
-  if [[ ! -f "${INDEX_FILE}" ]]; then
-    curl -sSL -o "${INDEX_FILE}" "${INDEX_URL}"
+  # Download the 2504-sample index
+  if [[ ! -s "${INDEX_FILE_2504}" ]]; then
+    echo "  Downloading 2,504-sample index..."
+    echo "    Source: ${INDEX_URL_2504}"
+    curl -sSL -o "${INDEX_FILE_2504}" "${INDEX_URL_2504}" || \
+      wget -q -O "${INDEX_FILE_2504}" "${INDEX_URL_2504}"
   fi
 
-  # Parse the index into a tab-separated manifest:
-  #   SAMPLE_ID  CRAM_FTP_URL  CRAI_FTP_URL  CRAM_MD5  BAS_FTP_URL
+  # Download the 698-sample index
+  if [[ ! -s "${INDEX_FILE_698}" ]]; then
+    echo "  Downloading 698-sample index..."
+    echo "    Source: ${INDEX_URL_698}"
+    curl -sSL -o "${INDEX_FILE_698}" "${INDEX_URL_698}" || \
+      wget -q -O "${INDEX_FILE_698}" "${INDEX_URL_698}"
+  fi
+
+  # Parse both sequence.index files into a unified manifest:
+  #   SAMPLE_ID  CRAM_FTP_URL  CRAI_FTP_URL  CRAM_MD5
   #
-  # The index has paths like:
-  #   ftp:/ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/.../{SAMPLE}.alt_bwamem_GRCh38DH.*.cram
-  # Note the single slash after "ftp:" — we fix it to "ftp://".
-  echo -e "SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5\tBAS_FTP_URL" > "${MANIFEST}"
-  grep -v '^#' "${INDEX_FILE}" | while IFS=$'\t' read -r cram cram_md5 crai _ bas _; do
-    [[ -z "${cram}" ]] && continue
-    # The IGSR index stores URLs with a single slash: "ftp:/ftp.1000genomes..."
-    # Fix to standard double-slash: "ftp://ftp.1000genomes..."
-    cram_url="${cram/ftp:\/ftp./ftp:\/\/ftp.}"
-    crai_url="${crai/ftp:\/ftp./ftp:\/\/ftp.}"
-    bas_url="${bas/ftp:\/ftp./ftp:\/\/ftp.}"
-    # Extract sample ID from the CRAM filename
-    cram_basename="$(basename "${cram}")"
-    sample_id="${cram_basename%%.*}"
-    echo -e "${sample_id}\t${cram_url}\t${crai_url}\t${cram_md5}\t${bas_url}"
+  # sequence.index columns (tab-separated):
+  #   1: ENA_FILE_PATH (CRAM URL on ftp.sra.ebi.ac.uk)
+  #   2: MD5SUM
+  #  10: SAMPLE_NAME
+  echo -e "SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5" > "${MANIFEST}"
+
+  for idx_file in "${INDEX_FILE_2504}" "${INDEX_FILE_698}"; do
+    if [[ ! -s "${idx_file}" ]]; then
+      echo "  ERROR: Index file missing or empty: ${idx_file}"
+      exit 1
+    fi
+    awk -F'\t' '
+      /^#/ { next }
+      $1 ~ /\.cram$/ {
+        sample = $10
+        cram   = $1
+        md5    = $2
+        crai   = cram ".crai"
+        if (sample != "" && cram != "")
+          print sample "\t" cram "\t" crai "\t" md5
+      }
+    ' "${idx_file}"
   done >> "${MANIFEST}"
 
   NFOUND=$(tail -n +2 "${MANIFEST}" | wc -l)

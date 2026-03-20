@@ -16,65 +16,43 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate 1000G setup manifest sample count
+      - name: Download real IGSR NYGC 30x sequence indexes
         working-directory: example/1000G_highcov
         run: |
           set -euo pipefail
           TEST_WORK="${RUNNER_TEMP}/highcov_setup_test"
-          MIN_MANIFEST_SAMPLES=3000
-          EXPECTED_MANIFEST_SAMPLES=3202
           mkdir -p "${TEST_WORK}/reference"
-          # Empty placeholders are sufficient here because this test targets only
-          # manifest generation/validation in step [4/5], not container/reference I/O.
+          # Empty placeholders — this test targets only manifest generation (step 4/5)
           touch "${TEST_WORK}/ngs-pca.sif" "${TEST_WORK}/reference/ref.fa" "${TEST_WORK}/igsr_sample_panel.ped"
 
-          INDEX_FILE_PATH="${TEST_WORK}/1000genomes.high_coverage.GRCh38DH.alignment.index"
-          python3 - "${INDEX_FILE_PATH}" "${EXPECTED_MANIFEST_SAMPLES}" <<'PY'
-          import sys
-          from pathlib import Path
+          # Download the real NYGC 30x sequence indexes from EBI FTP
+          echo "Downloading 2504-sample sequence index..."
+          curl -sSL -o "${TEST_WORK}/1000G_2504_high_coverage.sequence.index" \
+            "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.sequence.index"
+          echo "Downloading 698-sample sequence index..."
+          curl -sSL -o "${TEST_WORK}/1000G_698_related_high_coverage.sequence.index" \
+            "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.sequence.index"
 
-          out = Path(sys.argv[1])
-          expected_samples = int(sys.argv[2])
-          md5_length = 32
-          # Synthetic placeholder population code for fixture URLs.
-          pop_code = "TST"
-          out.parent.mkdir(parents=True, exist_ok=True)
-          with out.open("w", encoding="utf-8") as f:
-              for i in range(1, expected_samples + 1):
-                  # Synthetic IDs are sufficient for this test because 00_setup.sh
-                  # validates structure/count, not membership in IGSR sample panels.
-                  sample = f"HG{i:05d}"
-                  # Keep realistic sample IDs/paths so the generated manifest matches
-                  # the parser assumptions used by 00_setup.sh.
-                  base = (
-                      "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/"
-                      f"1000_genomes_project/data/{pop_code}/{sample}/high_cov_alignment/{sample}"
-                  )
-                  cram = f"{base}.alt_bwamem_GRCh38DH.20150917.{pop_code}.high_coverage.cram"
-                  crai = f"{cram}.crai"
-                  bas = f"{base}.bam.bas"
-                  # MD5 and placeholder columns are not validated by 00_setup.sh;
-                  # they are included to preserve index column structure.
-                  f.write(f"{cram}\t{'a'*md5_length}\t{crai}\t.\t{bas}\t.\n")
-          PY
-
+          # Run 00_setup.sh with real indexes
           WORK_DIR="${TEST_WORK}" \
           SIF_IMAGE="${TEST_WORK}/ngs-pca.sif" \
           REF_DIR="${TEST_WORK}/reference" \
           REF_FASTA="${TEST_WORK}/reference/ref.fa" \
-          INDEX_FILE="${INDEX_FILE_PATH}" \
+          INDEX_FILE_2504="${TEST_WORK}/1000G_2504_high_coverage.sequence.index" \
+          INDEX_FILE_698="${TEST_WORK}/1000G_698_related_high_coverage.sequence.index" \
           MANIFEST="${TEST_WORK}/manifest.tsv" \
           PANEL_FILE="${TEST_WORK}/igsr_sample_panel.ped" \
-          MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES}" \
-          EXPECTED_MANIFEST_SAMPLES="${EXPECTED_MANIFEST_SAMPLES}" \
+          MIN_MANIFEST_SAMPLES=3000 \
+          EXPECTED_MANIFEST_SAMPLES=3202 \
           bash 00_setup.sh
 
           SAMPLE_COUNT=$(tail -n +2 "${TEST_WORK}/manifest.tsv" | wc -l)
           echo "Manifest sample count: ${SAMPLE_COUNT}"
-          if (( SAMPLE_COUNT < MIN_MANIFEST_SAMPLES )); then
-            echo "::error::Manifest has only ${SAMPLE_COUNT} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
+          if (( SAMPLE_COUNT < 3000 )); then
+            echo "::error::Manifest has only ${SAMPLE_COUNT} samples (minimum expected: 3000)."
             exit 1
           fi
+          echo "Manifest validation passed (${SAMPLE_COUNT} samples)."
 
   integration-test:
     runs-on: ubuntu-latest
