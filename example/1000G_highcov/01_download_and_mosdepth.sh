@@ -49,6 +49,33 @@ module load aspera 2>/dev/null || true
 # Ensure log directory exists
 mkdir -p "${LOG_DIR}"
 
+if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+  echo "ERROR: SLURM_ARRAY_TASK_ID is not set. Submit this script as a SLURM array job."
+  exit 1
+fi
+
+if [[ ! -s "${MANIFEST}" ]]; then
+  echo "ERROR: Manifest missing or empty: ${MANIFEST}"
+  echo "Run setup first: bash 00_setup.sh"
+  exit 1
+fi
+
+TOTAL_SAMPLES=$(tail -n +2 "${MANIFEST}" | wc -l)
+if (( TOTAL_SAMPLES < MIN_MANIFEST_SAMPLES )); then
+  echo "ERROR: Manifest has only ${TOTAL_SAMPLES} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
+  echo "This likely indicates an incomplete manifest/index download."
+  echo "Rebuild it with: rm -f \"${MANIFEST}\" \"${INDEX_FILE}\" && bash 00_setup.sh"
+  exit 1
+fi
+if (( TOTAL_SAMPLES != EXPECTED_MANIFEST_SAMPLES )); then
+  echo "WARNING: Manifest has ${TOTAL_SAMPLES} samples (expected ${EXPECTED_MANIFEST_SAMPLES})."
+fi
+if (( SLURM_ARRAY_TASK_ID > TOTAL_SAMPLES )); then
+  echo "ERROR: Array task ${SLURM_ARRAY_TASK_ID} exceeds manifest size (${TOTAL_SAMPLES} samples)."
+  echo "Submit with a bounded array, e.g.: sbatch --array=1-${TOTAL_SAMPLES} 01_download_and_mosdepth.sh"
+  exit 1
+fi
+
 # ── Resolve the sample for this array task ───────────────────────────────────
 # SLURM_ARRAY_TASK_ID is 1-based; manifest line 1 is the header.
 LINE_NUM=$(( SLURM_ARRAY_TASK_ID + 1 ))
@@ -59,11 +86,18 @@ if [[ -z "${LINE}" ]]; then
   exit 1
 fi
 
-SAMPLE_ID=$(echo "${LINE}" | cut -f1)
-CRAM_FTP_URL=$(echo "${LINE}" | cut -f2)
-CRAI_FTP_URL=$(echo "${LINE}" | cut -f3)
-CRAM_MD5=$(echo "${LINE}" | cut -f4)
-BAS_FTP_URL=$(echo "${LINE}" | cut -f5)
+IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL _ <<< "${LINE}"
+
+if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
+  echo "ERROR: Manifest entry at line ${LINE_NUM} is missing required columns."
+  exit 1
+fi
+if [[ ! "${CRAM_FTP_URL}" =~ ^ftp://ftp\.1000genomes\.ebi\.ac\.uk/ || ! "${CRAI_FTP_URL}" =~ ^ftp://ftp\.1000genomes\.ebi\.ac\.uk/ ]]; then
+  echo "ERROR: Manifest entry at line ${LINE_NUM} has unsupported CRAM/CRAI source."
+  echo "  CRAM: ${CRAM_FTP_URL}"
+  echo "  CRAI: ${CRAI_FTP_URL}"
+  exit 1
+fi
 
 echo "============================================================"
 echo " Task ${SLURM_ARRAY_TASK_ID}: ${SAMPLE_ID}"

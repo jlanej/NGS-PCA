@@ -36,6 +36,49 @@ else
 fi
 source "${CONFIG_FILE}"
 
+validate_manifest() {
+  local manifest_file="$1"
+  if [[ ! -s "${manifest_file}" ]]; then
+    echo "ERROR: Manifest missing or empty: ${manifest_file}"
+    exit 1
+  fi
+
+  local header
+  header="$(head -n1 "${manifest_file}")"
+  if [[ "${header}" != $'SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5\tBAS_FTP_URL' ]]; then
+    echo "ERROR: Manifest header is invalid:"
+    echo "  got:      ${header}"
+    echo "  expected: SAMPLE_ID<TAB>CRAM_FTP_URL<TAB>CRAI_FTP_URL<TAB>CRAM_MD5<TAB>BAS_FTP_URL"
+    exit 1
+  fi
+
+  local invalid
+  invalid="$(awk -F'\t' '
+    NR==1 {next}
+    NF<5 || $1=="" || $2=="" || $3=="" || $2 !~ /^ftp:\/\/ftp\.1000genomes\.ebi\.ac\.uk\// || $3 !~ /^ftp:\/\/ftp\.1000genomes\.ebi\.ac\.uk\// {print NR; exit}
+  ' "${manifest_file}")"
+  if [[ -n "${invalid}" ]]; then
+    echo "ERROR: Manifest has invalid required fields/CRAM sources at line ${invalid}: ${manifest_file}"
+    echo "  Re-run setup to regenerate it:"
+    echo "    rm -f \"${manifest_file}\" && bash 00_setup.sh"
+    exit 1
+  fi
+
+  local nfound
+  nfound=$(tail -n +2 "${manifest_file}" | wc -l)
+  if (( nfound < MIN_MANIFEST_SAMPLES )); then
+    echo "ERROR: Manifest has only ${nfound} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
+    echo "  This often means the index download or parse was incomplete."
+    echo "  Re-run setup to regenerate it:"
+    echo "    rm -f \"${manifest_file}\" \"${INDEX_FILE}\" && bash 00_setup.sh"
+    exit 1
+  fi
+  if (( nfound != EXPECTED_MANIFEST_SAMPLES )); then
+    echo "WARNING: Manifest has ${nfound} samples (expected ${EXPECTED_MANIFEST_SAMPLES})."
+    echo "  Continuing, but confirm the selected index is up to date."
+  fi
+}
+
 echo "============================================================"
 echo " NGS-PCA 1000G High-Coverage Pipeline — Setup"
 echo "============================================================"
@@ -102,6 +145,7 @@ fi
 # ── 4. Download IGSR index and generate manifest ────────────────────────────
 if [[ -f "${MANIFEST}" ]]; then
   echo "[4/5] Manifest already exists: ${MANIFEST}  (skipping generation)"
+  validate_manifest "${MANIFEST}"
   NFOUND=$(tail -n +2 "${MANIFEST}" | wc -l)
   echo "  ${NFOUND} samples listed."
 else
@@ -134,6 +178,7 @@ else
   done >> "${MANIFEST}"
 
   NFOUND=$(tail -n +2 "${MANIFEST}" | wc -l)
+  validate_manifest "${MANIFEST}"
   echo "  Generated manifest with ${NFOUND} samples."
   echo ""
   echo "  Preview (first 5 lines):"

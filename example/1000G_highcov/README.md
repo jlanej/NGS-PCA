@@ -373,6 +373,7 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | `mosdepth: error: could not load index` | Ensure the CRAI file was downloaded alongside the CRAM. |
 | `OutOfMemoryError` in step 02 | Increase `--mem` in the SLURM directive and/or set `-Xmx` via `JAVA_TOOL_OPTIONS`. |
 | Fewer than 3,202 mosdepth files | Re-run `sbatch --array=<missing_ids> 01_download_and_mosdepth.sh` for failed tasks. |
+| `No manifest entry for task ...` | Your array range likely exceeds manifest size. Regenerate/validate manifest with `bash 00_setup.sh`, then submit `sbatch --array=1-$(tail -n +2 $WORK_DIR/manifest.tsv \| wc -l) 01_download_and_mosdepth.sh`. |
 | Manifest is empty or has too few samples | Re-download the IGSR index: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
 

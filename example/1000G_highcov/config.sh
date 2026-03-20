@@ -36,6 +36,8 @@ REF_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_ref
 INDEX_URL="https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
 INDEX_FILE="${INDEX_FILE:-${WORK_DIR}/1000genomes.high_coverage.GRCh38DH.alignment.index}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
+EXPECTED_MANIFEST_SAMPLES="${EXPECTED_MANIFEST_SAMPLES:-3202}"
+MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES:-3000}"
 
 # IGSR sample panel — population, superpopulation, reported sex (publicly available)
 PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped"
