@@ -7,6 +7,53 @@ on:
   workflow_dispatch:
 
 jobs:
+  highcov-setup-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download real IGSR NYGC 30x sequence indexes
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          TEST_WORK="${RUNNER_TEMP}/highcov_setup_test"
+          mkdir -p "${TEST_WORK}/reference"
+          # Empty placeholders — this test targets only manifest generation (step 4/5)
+          touch "${TEST_WORK}/ngs-pca.sif" "${TEST_WORK}/reference/ref.fa" "${TEST_WORK}/igsr_sample_panel.ped"
+
+          # Download the real NYGC 30x sequence indexes from EBI FTP
+          echo "Downloading 2504-sample sequence index..."
+          curl -sSL -o "${TEST_WORK}/1000G_2504_high_coverage.sequence.index" \
+            "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.sequence.index"
+          echo "Downloading 698-sample sequence index..."
+          curl -sSL -o "${TEST_WORK}/1000G_698_related_high_coverage.sequence.index" \
+            "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.sequence.index"
+
+          # Run 00_setup.sh with real indexes
+          WORK_DIR="${TEST_WORK}" \
+          SIF_IMAGE="${TEST_WORK}/ngs-pca.sif" \
+          REF_DIR="${TEST_WORK}/reference" \
+          REF_FASTA="${TEST_WORK}/reference/ref.fa" \
+          INDEX_FILE_2504="${TEST_WORK}/1000G_2504_high_coverage.sequence.index" \
+          INDEX_FILE_698="${TEST_WORK}/1000G_698_related_high_coverage.sequence.index" \
+          MANIFEST="${TEST_WORK}/manifest.tsv" \
+          PANEL_FILE="${TEST_WORK}/igsr_sample_panel.ped" \
+          MIN_MANIFEST_SAMPLES=3000 \
+          EXPECTED_MANIFEST_SAMPLES=3202 \
+          bash 00_setup.sh
+
+          SAMPLE_COUNT=$(tail -n +2 "${TEST_WORK}/manifest.tsv" | wc -l)
+          echo "Manifest sample count: ${SAMPLE_COUNT}"
+          if (( SAMPLE_COUNT < 3000 )); then
+            echo "::error::Manifest has only ${SAMPLE_COUNT} samples (minimum expected: 3000)."
+            exit 1
+          fi
+          echo "Manifest validation passed (${SAMPLE_COUNT} samples)."
+
   integration-test:
     runs-on: ubuntu-latest
     permissions:

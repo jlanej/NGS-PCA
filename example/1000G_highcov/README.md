@@ -17,7 +17,7 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | Stage | Script | What it does | SLURM type |
 |-------|--------|-------------|------------|
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
-| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM + BAS via Aspera → run mosdepth → remove CRAM | Array job (3,202 tasks) |
+| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera/wget → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
 | **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
 
@@ -99,16 +99,19 @@ This script performs four tasks:
 
 3. **Downloads the GRCh38 reference genome** (~3 GB) from the EBI 1000G FTP. mosdepth needs this to decode CRAM files. The download uses Aspera when available, with wget as fallback.
 
-4. **Downloads the official IGSR alignment index** and builds a tab-separated manifest (`manifest.tsv`) listing every sample ID, CRAM FTP URL, CRAI URL, and CRAM MD5. The index is maintained by IGSR at:
+4. **Downloads the NYGC 30x sequence indexes** (2,504 unrelated + 698 related) from the EBI FTP and builds a unified manifest (`manifest.tsv`) listing every sample ID, CRAM FTP URL, CRAI URL, and CRAM MD5. The indexes are part of the NYGC 30x data collection:
 
-   https://github.com/igsr/1000Genomes_data_indexes/blob/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index
+   - 2,504 samples: `ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.sequence.index`
+   - 698 related: `ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.sequence.index`
 
-   The manifest looks like:
+   > **Note:** The GitHub-hosted file `1000genomes.high_coverage.GRCh38DH.alignment.index` at [igsr/1000Genomes_data_indexes](https://github.com/igsr/1000Genomes_data_indexes) contains only the 2015 PCR-free pilot data (24 samples, one per population) — **not** the full 3,202-sample NYGC 30x dataset.
+
+   CRAMs are hosted on the ENA FTP (`ftp.sra.ebi.ac.uk`). The manifest looks like:
 
    ```
-   SAMPLE_ID  CRAM_FTP_URL                              CRAI_FTP_URL                               CRAM_MD5
-   HG00419    ftp://ftp.1000genomes.ebi.ac.uk/vol1/...  ftp://ftp.1000genomes.ebi.ac.uk/vol1/...   1d0115f2c1ff...
-   NA20845    ftp://ftp.1000genomes.ebi.ac.uk/vol1/...  ftp://ftp.1000genomes.ebi.ac.uk/vol1/...   c87ed65fe23f...
+   SAMPLE_ID  CRAM_FTP_URL                                    CRAI_FTP_URL                                         CRAM_MD5
+   NA12718    ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/...     ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/...crai      923ca8ff...
+   HG00096    ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/...     ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/...crai      355346708...
    ...
    ```
 
@@ -118,11 +121,11 @@ This script performs four tasks:
 sbatch 01_download_and_mosdepth.sh
 ```
 
-This is a SLURM array job (`--array=1-3202%25` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
+This is a SLURM array job (`--array=1-3202%200` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
 
 ```bash
-# Conservative throttling: max 25 concurrent tasks (default)
-sbatch --array=1-3202%25 01_download_and_mosdepth.sh
+# Recommended throttling: max 200 concurrent tasks (default)
+sbatch --array=1-3202%200 01_download_and_mosdepth.sh
 
 # Batch 4 samples per task + throttle to 20 concurrent tasks
 export SAMPLES_PER_TASK=4
@@ -133,18 +136,18 @@ sbatch --array=1-${TOTAL_TASKS}%20 01_download_and_mosdepth.sh
 
 Each sample in the task is still processed sequentially as:
 
-1. **Download** the CRAM and CRAI from EBI using **Aspera** (`ascp`) for high-speed transfer, falling back to `wget` if Aspera fails. Aspera typically achieves 10–100× faster transfers than FTP.
+1. **Download** the CRAM and CRAI from the ENA using **Aspera** (`ascp`) for high-speed transfer, falling back to `wget` if Aspera fails. Aspera typically achieves 10–100× faster transfers than FTP.
 
    ```
-   ascp -i /root/.aspera/connect/etc/asperaweb_id_dsa.openssh \
+   ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
      -Tr -Q -l 300m -P33001 -L- \
-     fasp-g1k@fasp.1000genomes.ebi.ac.uk:vol1/ftp/.../SAMPLE.cram \
+     era-fasp@fasp.sra.ebi.ac.uk:vol1/run/ERR323/ERR3239480/NA12718.final.cram \
      /download/
    ```
 
    > **Network requirements for Aspera:** TCP port 33001 (outgoing) and UDP port 33001 (both directions) must be open. See [IGSR download FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/) for details.
 
-2. **Verify** the downloaded CRAM's MD5 checksum against the value in the IGSR index.
+2. **Verify** the downloaded CRAM's MD5 checksum against the value in the NYGC sequence index.
 
 3. **Run mosdepth** in 1 kb bins:
 
@@ -233,14 +236,14 @@ This script aggregates three sources of publicly available (or already-computed)
 | **X coverage ratio** (X/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Y coverage ratio** (Y/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Inferred sex** (M/F from coverage) | Derived from X/Y ratios | Free — derived automatically |
-| **% mapped reads** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
-| **Duplication rate** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
-| **Total sequenced bases** | EBI `.bam.bas` file | ~KB download per sample alongside CRAM |
+| **% mapped reads** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
+| **Duplication rate** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
+| **Total sequenced bases** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
 | **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
 | **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
 
-The `.bam.bas` files are hosted on the EBI FTP alongside each CRAM (listed in the IGSR alignment index) and contain Picard-equivalent per-sample statistics generated as part of the original NYGC alignment pipeline (Byrska-Bishop et al. 2022, Cell). They are tiny (~few KB each) and are downloaded automatically during step 1.
+> **Note:** The `.bam.bas` files (Picard-equivalent QC statistics) are not automatically downloaded by this pipeline. If you have them from the original NYGC alignment pipeline (Byrska-Bishop et al. 2022), place them in `$WORK_DIR/bas_files/` and `03_collect_qc.sh` will pick them up. Otherwise, the BAS-derived columns (% mapped, duplication rate, total bases) will be `NA`.
 
 #### Output table columns
 
@@ -314,7 +317,7 @@ bash 00_setup.sh
 
 ## Download methods
 
-The pipeline downloads data from the EBI 1000 Genomes FTP. Three methods are available (in order of speed):
+The pipeline downloads CRAMs from the ENA FTP and reference data from the EBI 1000G FTP. Three download methods are available (in order of speed):
 
 ### 1. Aspera (optional, fastest)
 
@@ -332,11 +335,16 @@ module load ibm-aspera-connect
 When `ascp` is on `PATH` and `ASPERA_SSH_KEY` points to a valid key, the pipeline uses it automatically for all downloads. If `ascp` is not found, the pipeline falls back to `wget` without any manual intervention.
 
 ```bash
-# The EBI Aspera key is bundled with Aspera Connect at:
-# $HOME/.aspera/connect/etc/asperaweb_id_dsa.openssh
+# NYGC CRAMs are on the ENA — use the ENA Aspera user:
 ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
   -Tr -Q -l 300m -P33001 -L- \
-  fasp-g1k@fasp.1000genomes.ebi.ac.uk:vol1/ftp/data_collections/1000_genomes_project/data/CHS/HG00419/high_cov_alignment/HG00419.alt_bwamem_GRCh38DH.20150917.CHS.high_coverage.cram \
+  era-fasp@fasp.sra.ebi.ac.uk:vol1/run/ERR323/ERR3239480/NA12718.final.cram \
+  ./
+
+# Reference genome is on the 1000G FTP — use the 1000G Aspera user:
+ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
+  -Tr -Q -l 300m -P33001 -L- \
+  fasp-g1k@fasp.1000genomes.ebi.ac.uk:vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hla.fa \
   ./
 ```
 
@@ -351,7 +359,7 @@ If Aspera ports are blocked, [Globus](https://www.globus.org/) is a reliable alt
 The pipeline automatically falls back to `wget` if Aspera fails. This is slower but works on any network:
 
 ```bash
-wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/data/CHS/HG00419/high_cov_alignment/HG00419.alt_bwamem_GRCh38DH.20150917.CHS.high_coverage.cram
+wget ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/ERR3239480/NA12718.final.cram
 ```
 
 ---
@@ -387,7 +395,7 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | `OutOfMemoryError` in step 02 | Increase `--mem` in the SLURM directive and/or set `-Xmx` via `JAVA_TOOL_OPTIONS`. |
 | Fewer than 3,202 mosdepth files | Re-run `sbatch --array=<missing_ids> 01_download_and_mosdepth.sh` for failed tasks. |
 | `Array task ... exceeds task count` | Use the Step 1 batching submission snippet above to recompute `TOTAL_TASKS` and resubmit with `%` throttling. |
-| Manifest is empty or has too few samples | Re-download the IGSR index: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
+| Manifest is empty or has too few samples | Re-download the indexes: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
 | First ~25–30 tasks run, then many download failures | This is often remote/network connection saturation. Keep `%` throttling on array submissions (for example `%10` to `%30`) and/or increase `SAMPLES_PER_TASK` to reduce concurrent Aspera/wget sessions. |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
 
@@ -397,5 +405,7 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 
 - **1000 Genomes 30x data portal:** https://www.internationalgenome.org/data-portal/data-collection/30x-grch38
 - **IGSR download FAQ:** https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/
-- **IGSR alignment index (GitHub):** https://github.com/igsr/1000Genomes_data_indexes/tree/master/data_collections/1000_genomes_project
+- **NYGC 30x sequence indexes (EBI FTP):** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/
+- **ENA projects:** [PRJEB31736](https://www.ebi.ac.uk/ena/browser/view/PRJEB31736) (2,504 unrelated), [PRJEB36890](https://www.ebi.ac.uk/ena/browser/view/PRJEB36890) (698 related), [PRJEB55077](https://www.ebi.ac.uk/ena/browser/view/PRJEB55077) (3,202 combined)
 - **GRCh38 reference genome:** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/
+- **Byrska-Bishop et al. (2022):** https://doi.org/10.1016/j.cell.2022.08.004

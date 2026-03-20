@@ -4,10 +4,9 @@
 # =============================================================================
 #
 # SLURM array job: each task processes one or more samples from the manifest.
-#   1. Download the CRAM + CRAI from EBI via Aspera (falls back to wget)
+#   1. Download the CRAM + CRAI from ENA via Aspera (falls back to wget)
 #   2. Run mosdepth to compute 1 kb bin coverage
-#   3. Download BAS file (per-sample QC stats)
-#   4. Remove the downloaded CRAM/CRAI to free disk space
+#   3. Remove the downloaded CRAM/CRAI to free disk space
 #
 # Usage:
 #   # After running 00_setup.sh:
@@ -23,7 +22,7 @@
 #SBATCH --job-name=1kG_mosdepth
 #SBATCH --output=logs/mosdepth_%A_%a.out
 #SBATCH --error=logs/mosdepth_%A_%a.err
-#SBATCH --array=1-3202%25
+#SBATCH --array=1-3202%200
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=04:00:00
@@ -68,7 +67,7 @@ TOTAL_SAMPLES=$(tail -n +2 "${MANIFEST}" | wc -l)
 if (( TOTAL_SAMPLES < MIN_MANIFEST_SAMPLES )); then
   echo "ERROR: Manifest has only ${TOTAL_SAMPLES} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
   echo "This likely indicates an incomplete manifest/index download."
-  echo "Rebuild it with: rm -f \"${MANIFEST}\" \"${INDEX_FILE}\" && bash 00_setup.sh"
+  echo "Rebuild it with: rm -f \"${MANIFEST}\" \"${INDEX_FILE_2504}\" \"${INDEX_FILE_698}\" && bash 00_setup.sh"
   exit 1
 fi
 if (( TOTAL_SAMPLES != EXPECTED_MANIFEST_SAMPLES )); then
@@ -90,23 +89,31 @@ fi
 # ── Stage 1: Download CRAM + CRAI ───────────────────────────────────────────
 
 download_aspera() {
-  # Convert FTP URL to Aspera path and download using system ascp.
-  #   ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/... → vol1/ftp/...
-  # ascp saves with the original remote filename; caller renames as needed.
+  # Download a file via Aspera. Supports both EBI 1000G FTP and ENA SRA FTP URLs.
+  #   ftp://ftp.sra.ebi.ac.uk/vol1/run/...         → era-fasp@fasp.sra.ebi.ac.uk:vol1/run/...
+  #   ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/...  → fasp-g1k@fasp.1000genomes.ebi.ac.uk:vol1/ftp/...
   local ftp_url="$1"
   local dest="$2"
-  local aspera_path
-  # Strip the FTP server prefix to get the Aspera-compatible remote path
-  # e.g. "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/..." → "vol1/ftp/..."
-  aspera_path="${ftp_url//ftp:\/\/ftp.1000genomes.ebi.ac.uk\//}"
-  # Use system ascp (install Aspera Connect on your HPC or load it as a module)
+  local aspera_path aspera_user
+
   command -v ascp &>/dev/null || return 1
+
+  if [[ "${ftp_url}" == *"ftp.sra.ebi.ac.uk"* ]]; then
+    aspera_path="${ftp_url//ftp:\/\/ftp.sra.ebi.ac.uk\//}"
+    aspera_user="${ENA_ASPERA_USER}"
+  elif [[ "${ftp_url}" == *"ftp.1000genomes.ebi.ac.uk"* ]]; then
+    aspera_path="${ftp_url//ftp:\/\/ftp.1000genomes.ebi.ac.uk\//}"
+    aspera_user="${EBI_ASPERA_USER}"
+  else
+    return 1
+  fi
+
   local remote_basename
   remote_basename="$(basename "${aspera_path}")"
   local downloaded="${CRAM_DIR}/${remote_basename}"
   if ! ascp -i "${ASPERA_SSH_KEY}" \
     -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
-    "${EBI_ASPERA_USER}:${aspera_path}" \
+    "${aspera_user}:${aspera_path}" \
     "${CRAM_DIR}/"; then
     # Clean up any partial download left by ascp
     rm -f "${downloaded}" "${dest}"
@@ -136,9 +143,9 @@ process_manifest_line() {
     return 1
   fi
 
-  local SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL
-  # Parse tab-separated manifest columns in one pass (preserves empty trailing BAS field).
-  IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 BAS_FTP_URL _ <<< "${line}"
+  local SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5
+  # Parse tab-separated manifest columns.
+  IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 _ <<< "${line}"
   if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
     echo "ERROR: Manifest entry at line ${line_num} is missing required columns."
     return 1
@@ -167,7 +174,7 @@ process_manifest_line() {
   fi
 
   if [[ ! -f "${LOCAL_CRAM}" ]]; then
-    echo "[1/4] Downloading CRAM..."
+    echo "[1/3] Downloading CRAM..."
     if download_aspera "${CRAM_FTP_URL}" "${LOCAL_CRAM}"; then
       echo "  Aspera download complete."
     else
@@ -176,7 +183,7 @@ process_manifest_line() {
       echo "  wget download complete."
     fi
   else
-    echo "[1/4] CRAM already present: ${LOCAL_CRAM}"
+    echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
   fi
 
   if [[ ! -f "${LOCAL_CRAI}" ]]; then
@@ -206,7 +213,7 @@ process_manifest_line() {
   fi
 
   # ── Stage 2: Run mosdepth ─────────────────────────────────────────────────
-  echo "[2/4] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
+  echo "[2/3] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
 
   apptainer exec \
     --bind "${CRAM_DIR}":/crams \
@@ -228,27 +235,8 @@ process_manifest_line() {
   fi
   echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
 
-  # ── Stage 3: Download BAS file (per-sample QC stats, ~KB) ─────────────────
-  mkdir -p "${BAS_DIR}"
-  LOCAL_BAS="${BAS_DIR}/${SAMPLE_ID}.bam.bas"
-
-  if [[ -f "${LOCAL_BAS}" ]]; then
-    echo "[3/4] BAS file already present: ${LOCAL_BAS}"
-  elif [[ -z "${BAS_FTP_URL}" ]]; then
-    echo "[3/4] No BAS URL in manifest; skipping BAS download."
-  else
-    echo "[3/4] Downloading BAS file (per-sample QC)..."
-    if download_aspera "${BAS_FTP_URL}" "${LOCAL_BAS}"; then
-      echo "  Aspera download complete."
-    else
-      echo "  Aspera failed; falling back to wget..."
-      download_wget "${BAS_FTP_URL}" "${LOCAL_BAS}"
-      echo "  wget download complete."
-    fi
-  fi
-
-  # ── Stage 4: Clean up CRAM/CRAI ───────────────────────────────────────────
-  echo "[4/4] Cleaning up downloaded CRAM/CRAI..."
+  # ── Stage 3: Clean up CRAM/CRAI ───────────────────────────────────────────
+  echo "[3/3] Cleaning up downloaded CRAM/CRAI..."
   rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
   echo "  Removed: ${LOCAL_CRAM}"
   echo "  Removed: ${LOCAL_CRAI}"

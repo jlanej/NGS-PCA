@@ -31,29 +31,44 @@ REF_FASTA="${REF_FASTA:-${REF_DIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa}"
 REF_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hla.fa"
 
 # ── 1000G high-coverage data (3,202 NYGC 30x WGS samples) ──────────────────
-# Official IGSR alignment index — lists every CRAM with its FTP path and MD5.
+# NYGC 30x sequence indexes — one for the 2,504 unrelated samples, one for the
+# 698 related samples.  Together they cover all 3,202 high-coverage samples.
+#
+# IMPORTANT: The GitHub-hosted file at igsr/1000Genomes_data_indexes (master)
+# named "1000genomes.high_coverage.GRCh38DH.alignment.index" contains only the
+# original 2015 PCR-free pilot data (24 samples, one per population).
+# The full NYGC 30x indexes live on the EBI FTP under 1000G_2504_high_coverage.
+#
+# The sequence.index files list CRAMs on the ENA FTP (ftp.sra.ebi.ac.uk).
+# Columns: ENA_FILE_PATH  MD5SUM  RUN_ID  ...  SAMPLE_NAME  POPULATION  ...
+#
 # See: https://www.internationalgenome.org/data-portal/data-collection/30x-grch38
-INDEX_URL="https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
-INDEX_FILE="${INDEX_FILE:-${WORK_DIR}/1000genomes.high_coverage.GRCh38DH.alignment.index}"
+# Ref: Byrska-Bishop et al. (2022) Cell 185(18):3426-3440
+INDEX_URL_2504="${INDEX_URL_2504:-ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.sequence.index}"
+INDEX_URL_698="${INDEX_URL_698:-ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.sequence.index}"
+INDEX_FILE_2504="${INDEX_FILE_2504:-${WORK_DIR}/1000G_2504_high_coverage.sequence.index}"
+INDEX_FILE_698="${INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.sequence.index}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
 EXPECTED_MANIFEST_SAMPLES="${EXPECTED_MANIFEST_SAMPLES:-3202}"
 MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES:-3000}"
-EXPECTED_FTP_PREFIX="${EXPECTED_FTP_PREFIX:-ftp://ftp.1000genomes.ebi.ac.uk/}"
+# CRAM URLs in the NYGC indexes point to the ENA FTP (ftp.sra.ebi.ac.uk)
+EXPECTED_FTP_PREFIX="${EXPECTED_FTP_PREFIX:-ftp://ftp.sra.ebi.ac.uk/}"
 
 # IGSR sample panel — population, superpopulation, reported sex (publicly available)
 PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped"
 PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 
-# EBI Aspera settings (high-speed FASP transfers — requires system ascp)
+# EBI/ENA Aspera settings (high-speed FASP transfers — requires system ascp)
 # Install Aspera Connect from https://www.ibm.com/products/aspera/downloads
 # or load it as an HPC module: module load aspera-connect
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data
-EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
 ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh}"
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
-
-# EBI FTP base (fallback for wget/curl)
+# NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
+ENA_ASPERA_USER="era-fasp@fasp.sra.ebi.ac.uk"
+EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
+ENA_FTP_BASE="ftp://ftp.sra.ebi.ac.uk"
 EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 
 # ── Download array batching/concurrency controls ────────────────────────────
@@ -61,7 +76,7 @@ EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 SAMPLES_PER_TASK="${SAMPLES_PER_TASK:-1}"
 # Recommended max number of concurrently running array tasks when submitting:
 #   sbatch --array=1-N%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh
-MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-25}"
+MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-200}"
 
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
