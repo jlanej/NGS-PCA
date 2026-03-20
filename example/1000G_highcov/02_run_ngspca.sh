@@ -24,8 +24,18 @@
 #SBATCH --time=12:00:00
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "${SCRIPT_DIR}/config.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/config.sh" ]]; then
+  CONFIG_FILE="${SLURM_SUBMIT_DIR}/config.sh"
+elif [[ -f "${SCRIPT_DIR}/config.sh" ]]; then
+  CONFIG_FILE="${SCRIPT_DIR}/config.sh"
+elif [[ -f "$(pwd)/config.sh" ]]; then
+  CONFIG_FILE="$(pwd)/config.sh"
+else
+  echo "ERROR: Could not find config.sh (checked \$SLURM_SUBMIT_DIR, script directory, and current directory)."
+  exit 1
+fi
+source "${CONFIG_FILE}"
 
 # Ensure log and output directories exist
 mkdir -p "${LOG_DIR}" "${NGSPCA_OUTPUT}"

@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # Source this file from every pipeline script:
-#   source "$(dirname "$0")/config.sh"
+#   source "${SLURM_SUBMIT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/config.sh"
 #
 # Override any variable by exporting it before sourcing, e.g.:
 #   export WORK_DIR=/scratch/user/1000G_highcov
