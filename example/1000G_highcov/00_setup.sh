@@ -144,7 +144,7 @@ if [[ ! -f "${REF_FASTA}.fai" ]]; then
 fi
 
 # ── 4. Download NYGC sequence indexes and generate manifest ─────────────────
-# The NYGC 30x sequence.index files (2504 + 698) use the ENA format:
+# The two NYGC 30x sequence.index files (2,504 and 698 samples) use the ENA format:
 #   ENA_FILE_PATH  MD5SUM  RUN_ID  ...  SAMPLE_NAME(col10)  POPULATION(col11) ...
 # ENA_FILE_PATH points to CRAMs on ftp.sra.ebi.ac.uk.
 # CRAI files follow the convention: {CRAM_URL}.crai

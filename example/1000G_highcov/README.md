@@ -243,7 +243,7 @@ This script aggregates three sources of publicly available (or already-computed)
 | **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
 
-> **Note:** The `.bam.bas` files (Picard-equivalent QC statistics) are not automatically downloaded by the NYGC pipeline. If you have them from the original NYGC alignment pipeline (Byrska-Bishop et al. 2022), place them in `$WORK_DIR/bas_files/` and `03_collect_qc.sh` will pick them up. Otherwise, the BAS-derived columns (% mapped, duplication rate, total bases) will be `NA`.
+> **Note:** The `.bam.bas` files (Picard-equivalent QC statistics) are not automatically downloaded by this pipeline. If you have them from the original NYGC alignment pipeline (Byrska-Bishop et al. 2022), place them in `$WORK_DIR/bas_files/` and `03_collect_qc.sh` will pick them up. Otherwise, the BAS-derived columns (% mapped, duplication rate, total bases) will be `NA`.
 
 #### Output table columns
 
