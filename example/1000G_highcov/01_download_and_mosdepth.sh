@@ -32,6 +32,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/config.sh"
 
+# Attempt to load the Aspera module if the HPC module system is available.
+# This is a no-op when 'module' is not present or 'aspera' is not a module.
+module load aspera 2>/dev/null || true
+
 # Ensure log directory exists
 mkdir -p "${LOG_DIR}"
 
@@ -59,14 +63,16 @@ echo "============================================================"
 
 # ── Skip if mosdepth output already exists ───────────────────────────────────
 MOSDEPTH_OUTPUT="${MOSDEPTH_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
+LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
+LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
 if [[ -f "${MOSDEPTH_OUTPUT}" ]]; then
   echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
+  # Clean up any leftover CRAM/CRAI from a previous partial run to free disk space
+  rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
   exit 0
 fi
 
 # ── Stage 1: Download CRAM + CRAI ───────────────────────────────────────────
-LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
-LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
 
 download_aspera() {
   # Convert FTP URL to Aspera path and download using system ascp.
@@ -80,14 +86,18 @@ download_aspera() {
   aspera_path="${ftp_url//ftp:\/\/ftp.1000genomes.ebi.ac.uk\//}"
   # Use system ascp (install Aspera Connect on your HPC or load it as a module)
   command -v ascp &>/dev/null || return 1
-  ascp -i "${ASPERA_SSH_KEY}" \
-    -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
-    "${EBI_ASPERA_USER}:${aspera_path}" \
-    "${CRAM_DIR}/"
-  # Rename to the desired local filename if it differs from the remote name
   local remote_basename
   remote_basename="$(basename "${aspera_path}")"
   local downloaded="${CRAM_DIR}/${remote_basename}"
+  if ! ascp -i "${ASPERA_SSH_KEY}" \
+    -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
+    "${EBI_ASPERA_USER}:${aspera_path}" \
+    "${CRAM_DIR}/"; then
+    # Clean up any partial download left by ascp
+    rm -f "${downloaded}" "${dest}"
+    return 1
+  fi
+  # Rename to the desired local filename if it differs from the remote name
   if [[ "${downloaded}" != "${dest}" && -f "${downloaded}" ]]; then
     mv "${downloaded}" "${dest}"
   fi
@@ -96,7 +106,10 @@ download_aspera() {
 download_wget() {
   local ftp_url="$1"
   local dest="$2"
-  wget -q -O "${dest}" "${ftp_url}"
+  if ! wget -q -O "${dest}" "${ftp_url}"; then
+    rm -f "${dest}"
+    return 1
+  fi
 }
 
 if [[ ! -f "${LOCAL_CRAM}" ]]; then
