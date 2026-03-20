@@ -12,7 +12,6 @@ Fully reproducible pipeline for computing ~200 coverage-based principal componen
 
 The pipeline has four stages, each implemented as a standalone script that can be submitted to a SLURM-based HPC scheduler:
 
-
 > **SLURM note:** Submit jobs from this directory (`example/1000G_highcov`) so the scripts can source `config.sh` via `$SLURM_SUBMIT_DIR`.
 
 | Stage | Script | What it does | SLURM type |
