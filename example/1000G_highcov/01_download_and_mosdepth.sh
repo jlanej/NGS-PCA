@@ -261,7 +261,15 @@ process_manifest_line() {
 }
 
 echo "Task ${SLURM_ARRAY_TASK_ID} will process manifest sample indices ${TASK_START}-${TASK_END} of ${TOTAL_SAMPLES} (SAMPLES_PER_TASK=${SAMPLES_PER_TASK})."
+FAILED_LINES=()
 for SAMPLE_IDX in $(seq "${TASK_START}" "${TASK_END}"); do
   LINE_NUM=$(( SAMPLE_IDX + 1 ))
-  process_manifest_line "${LINE_NUM}"
+  if ! process_manifest_line "${LINE_NUM}"; then
+    FAILED_LINES+=("${LINE_NUM}")
+  fi
 done
+
+if (( ${#FAILED_LINES[@]} > 0 )); then
+  echo "ERROR: ${#FAILED_LINES[@]} manifest line(s) failed in task ${SLURM_ARRAY_TASK_ID}: ${FAILED_LINES[*]}"
+  exit 1
+fi
