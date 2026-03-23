@@ -25,7 +25,7 @@
 #SBATCH --array=1-3202%200
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
