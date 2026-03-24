@@ -1,0 +1,47 @@
+name: Generate Workflow Diagram
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'docs/generate_workflow_diagram.py'
+      - 'docs/Dockerfile.diagram'
+      - '.github/workflows/workflow-diagram.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-diagram:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build diagram Docker image
+        run: docker build -f docs/Dockerfile.diagram -t ngspca-diagram .
+
+      - name: Generate diagram
+        run: |
+          docker run --rm -v "${{ github.workspace }}/docs:/output" ngspca-diagram /output
+
+      - name: Verify outputs exist
+        run: |
+          test -f docs/pipeline_workflow.png || { echo "::error::PNG not generated"; exit 1; }
+          test -f docs/pipeline_workflow.pdf || { echo "::error::PDF not generated"; exit 1; }
+          echo "Diagram generated successfully"
+          ls -lh docs/pipeline_workflow.*
+
+      - name: Commit updated diagram
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/pipeline_workflow.png docs/pipeline_workflow.pdf
+          if git diff --cached --quiet; then
+            echo "Diagram unchanged — nothing to commit."
+          else
+            git commit -m "docs: regenerate pipeline workflow diagram [skip ci]"
+            git push
+          fi

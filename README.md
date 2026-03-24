@@ -4,6 +4,8 @@ Principal component analysis of next-generation sequencing coverage data via ran
 
 ## Overview
 
+![NGS-PCA Pipeline Workflow](docs/pipeline_workflow.png)
+
 NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
 
 1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).

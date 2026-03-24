@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.description="Reproducible diagram generation for NGS-PCA"
+
+RUN pip install --no-cache-dir matplotlib==3.10.1
+
+WORKDIR /work
+COPY docs/generate_workflow_diagram.py /work/generate_workflow_diagram.py
+
+ENTRYPOINT ["python", "/work/generate_workflow_diagram.py"]
+CMD ["/output"]
