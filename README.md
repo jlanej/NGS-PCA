@@ -85,7 +85,7 @@ The parameters below reflect those used in a real-world run of **142,000 samples
 
 ### On HPC with Apptainer (recommended)
 
-Pull the pre-built image and run directly — no Java or Maven installation required. Exclusion BED files are bundled inside the image at `/app/resources/`:
+Pull the pre-built image and run directly — no Java or Maven installation required. Exclusion BED files are bundled inside the image at `/app/resources/`. The image also includes mosdepth, so a single image handles both Step 1 and Step 2; see [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a complete example.
 
 ```bash
 apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
