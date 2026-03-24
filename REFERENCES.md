@@ -193,20 +193,7 @@ Version bundled in container: **v0.3.9**
 
 ---
 
-### 4.2 HTSJDK
-
-Broad Institute & collaborators. HTSJDK: A Java API for high-throughput sequencing data (HTS)
-formats.
-GitHub: <https://github.com/samtools/htsjdk>
-Version used: **2.16.0** (declared in `ngspca/pom.xml`)
-
-> **How used:** Provides the `BEDFileReader` and `BEDFeature` classes used in
-> `MosdepthUtils.java` and `BedUtils.java` to parse mosdepth BED output files and perform
-> genomic-region overlap detection against the exclusion BED.
-
----
-
-### 4.3 bedtools
+### 4.2 bedtools
 
 **Quinlan, A. R., & Hall, I. M. (2010).** BEDTools: a flexible suite of utilities for comparing
 genomic features. *Bioinformatics*, 26(6), 841–842.
@@ -220,7 +207,7 @@ Website: <https://bedtools.readthedocs.io/>
 
 ---
 
-### 4.4 SAMtools
+### 4.3 SAMtools
 
 **Li, H., Handsaker, B., Wysoker, A., Fennell, T., Ruan, J., Homer, N., … Durbin, R. (2009).**
 The Sequence Alignment/Map format and SAMtools. *Bioinformatics*, 25(16), 2078–2079.
@@ -232,7 +219,7 @@ Website: <https://www.htslib.org/>
 
 ---
 
-### 4.5 IBM Aspera Connect
+### 4.4 IBM Aspera Connect
 
 IBM. Aspera Connect — high-speed file transfer using the FASP protocol.
 Download: <https://www.ibm.com/products/aspera/downloads>
@@ -246,7 +233,7 @@ Version bundled in container: **v4.2.12.780**
 
 ---
 
-### 4.6 Apptainer (formerly Singularity)
+### 4.5 Apptainer (formerly Singularity)
 
 **Kurtzer, G. M., Sochat, V., & Bauer, M. W. (2017).** Singularity: Scientific containers for
 mobility of compute. *PLOS ONE*, 12(5), e0177459.
@@ -260,7 +247,7 @@ Website: <https://apptainer.org/>
 
 ---
 
-### 4.7 Globus
+### 4.6 Globus
 
 Globus. Managed file transfer service.
 Website: <https://www.globus.org/>
@@ -277,6 +264,8 @@ Website: <https://www.globus.org/>
 The Apache Software Foundation. Commons Math: The Apache Commons Mathematics Library.
 <https://commons.apache.org/proper/commons-math/>
 Version used: **3.6.1** (declared in `ngspca/pom.xml`)
+License: **Apache License 2.0** — <https://github.com/apache/commons-math/blob/master/LICENSE.txt>
+Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 > **How used:** Core numerical library throughout `ngspca/src/`. Provides:
 > - `BlockRealMatrix` and `RealMatrix` — dense matrix representations for the coverage and SVD matrices
@@ -293,6 +282,8 @@ Version used: **3.6.1** (declared in `ngspca/pom.xml`)
 <https://ejml.org/>
 GitHub: <https://github.com/lessthanoptimal/ejml>
 Version used: **0.30** (declared in `ngspca/pom.xml`)
+License: **Apache License 2.0** — <https://github.com/lessthanoptimal/ejml/blob/master/LICENSE-2.0.txt>
+Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 > **How used:** Dense matrix operations in the Java source. Declared as a dependency in `pom.xml`.
 
@@ -304,6 +295,9 @@ Version used: **0.30** (declared in `ngspca/pom.xml`)
 JAMA: A Java Matrix Package.
 <https://math.nist.gov/javanumerics/jama/>
 Version used: **1.0.3** (declared in `ngspca/pom.xml`)
+License: **Public Domain** — JAMA is a cooperative product of The MathWorks and the National
+Institute of Standards and Technology (NIST) and is not subject to copyright protection in the
+United States. See the project home page: <https://math.nist.gov/javanumerics/jama/#license>
 
 > **How used:** Currently used for `QRDecomposition` inside the power iteration loop in
 > `RandomizedSVD.java` (converting `RealMatrix` → `Matrix` → `QRDecomposition` → `RealMatrix`).
@@ -317,6 +311,8 @@ Version used: **1.0.3** (declared in `ngspca/pom.xml`)
 The Apache Software Foundation. Commons CLI: Command Line Interface.
 <https://commons.apache.org/proper/commons-cli/>
 Version used: **1.4** (declared in `ngspca/pom.xml`)
+License: **Apache License 2.0** — <https://github.com/apache/commons-cli/blob/master/LICENSE.txt>
+Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 > **How used:** Parses command-line arguments in `CmdLine.java`, providing the `-input`,
 > `-outputDir`, `-numPC`, `-bedExclude`, and all other user-facing parameters.
@@ -328,6 +324,8 @@ Version used: **1.4** (declared in `ngspca/pom.xml`)
 The Apache Software Foundation. Commons Lang.
 <https://commons.apache.org/proper/commons-lang/>
 Version used: **3.7** (declared in `ngspca/pom.xml`)
+License: **Apache License 2.0** — <https://github.com/apache/commons-lang/blob/master/LICENSE.txt>
+Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 > **How used:** General-purpose string and utility functions used across the Java source.
 
@@ -338,16 +336,34 @@ Version used: **3.7** (declared in `ngspca/pom.xml`)
 The Apache Software Foundation. Commons IO.
 <https://commons.apache.org/proper/commons-io/>
 Version used: **2.6** (declared in `ngspca/pom.xml`)
+License: **Apache License 2.0** — <https://github.com/apache/commons-io/blob/master/LICENSE.txt>
+Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 > **How used:** File I/O utilities in `FileOps.java` (e.g., `FileUtils.writeStringToFile`).
 
 ---
 
-### 5.7 JUnit
+### 5.7 HTSJDK
+
+Broad Institute & collaborators. HTSJDK: A Java API for high-throughput sequencing data (HTS)
+formats.
+GitHub: <https://github.com/samtools/htsjdk>
+Version used: **2.16.0** (declared in `ngspca/pom.xml`)
+License: **MIT License** — <https://github.com/samtools/htsjdk/blob/master/LICENSE.txt>
+
+> **How used:** Provides the `BEDFileReader` and `BEDFeature` classes used in
+> `MosdepthUtils.java` and `BedUtils.java` to parse mosdepth BED output files and perform
+> genomic-region overlap detection against the exclusion BED.
+
+---
+
+### 5.8 JUnit
 
 JUnit Contributors. JUnit — Java Testing Framework.
 <https://junit.org/>
 Version used: **3.8.1** (declared in `ngspca/pom.xml`, test scope)
+License: **IBM Common Public License v1.0 (CPL-1.0)** — used by JUnit 3.x releases.
+Full license text: <https://opensource.org/licenses/cpl1.0.php>
 
 > **How used:** Unit testing framework for `ngspca/src/test/java/org/pankratzlab/ngspca/AppTest.java`.
 
