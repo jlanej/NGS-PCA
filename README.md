@@ -10,13 +10,57 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
 3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
-## Prerequisites
-
-Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instructions](https://github.com/brentp/mosdepth#installation)).
-
 ## Step 1: Run mosdepth
 
-Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported:
+Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported.
+
+Mosdepth is bundled in the pre-built Apptainer image — no separate installation is required when using Apptainer. If you prefer to install mosdepth another way (conda, bioconda, pre-built binary, etc.), see the [mosdepth installation instructions](https://github.com/brentp/mosdepth#installation); the commands in the *Alternative: direct install* section below apply unchanged.
+
+### With Apptainer (recommended)
+
+Pull the image once, then use `apptainer exec` to run mosdepth with appropriate bind mounts for your input files, reference genome, and output directory:
+
+```bash
+apptainer pull ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest
+
+ref=/path/to/GRCh38_full_analysis_set_plus_decoy_hla.fa
+inputBam=/path/to/bams/sample.bam
+mosdepthResultsDir=/path/to/mosdepthOutput/
+
+apptainer exec \
+  --bind "$(dirname "$inputBam")":/bams \
+  --bind "$(dirname "$ref")":/ref \
+  --bind "$mosdepthResultsDir":/mosdepth \
+  ngs-pca.sif \
+  mosdepth -n -t 1 --by 1000 \
+    --fasta /ref/"$(basename "$ref")" \
+    /mosdepth/sample.by1000 \
+    /bams/"$(basename "$inputBam")"
+```
+
+To process a directory of BAM/CRAM files in parallel with Apptainer:
+
+```bash
+ref=/path/to/GRCh38_full_analysis_set_plus_decoy_hla.fa
+dirOfBams=/path/to/bams/
+mosdepthResultsDir=/path/to/mosdepthOutput/
+mkdir -p "$mosdepthResultsDir"
+
+find "$dirOfBams" -type f -name "*.bam" | parallel -j 24 \
+  apptainer exec \
+    --bind "$dirOfBams":/bams \
+    --bind "$(dirname "$ref")":/ref \
+    --bind "$mosdepthResultsDir":/mosdepth \
+    ngs-pca.sif \
+    mosdepth -n -t 1 --by 1000 \
+      --fasta /ref/"$(basename "$ref")" \
+      /mosdepth/{/.}.by1000 \
+      /bams/{/}
+```
+
+### Alternative: direct mosdepth install
+
+If mosdepth is already installed on your system (via conda, bioconda, a pre-built binary, or any other method), the commands below work the same way:
 
 ```bash
 mosdepth -n -t 1 --by 1000 \
