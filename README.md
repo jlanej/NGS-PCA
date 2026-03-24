@@ -18,7 +18,7 @@ Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instru
 
 Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported:
 
-> **mosdepth is bundled in the container image.** If you are using the Apptainer image (see [Step 2](#step-2-run-ngs-pca)), you do not need to install mosdepth separately — invoke it via `apptainer exec`. See [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a working example.
+> **mosdepth is bundled in the container image.** If you are using the Apptainer image, mosdepth is prepackaged and could be invoked via `apptainer exec`. See [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a working example.
 
 ```bash
 mosdepth -n -t 1 --by 1000 \
