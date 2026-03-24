@@ -170,3 +170,7 @@ CI validates deterministic output on every pull request and push to `main`/`mast
 
 See [docs/future-work.md](docs/future-work.md) for a summary of known performance, scientific, and code-quality improvements that are planned or under consideration.
 
+## References
+
+See [REFERENCES.md](REFERENCES.md) for a complete list of all software, algorithms, datasets, and databases used by this repository, along with descriptions of how each is used and guidance on what to cite in publications.
+
