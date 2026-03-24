@@ -24,7 +24,7 @@ import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
 # ---------------------------------------------------------------------------
-# Colour palette – muted, colour-blind-friendly (adapted from Paul Tol)
+# Color palette – muted, color-blind-friendly (adapted from Paul Tol)
 # ---------------------------------------------------------------------------
 CLR_INPUT = "#4477AA"       # blue  – input data
 CLR_TOOL = "#228833"        # green – external tool (mosdepth)
@@ -34,8 +34,8 @@ CLR_NEXT = "#AA3377"        # purple – downstream / future
 CLR_ARROW = "#555555"       # grey  – arrows
 CLR_BG = "#FFFFFF"          # white background
 CLR_BORDER = "#333333"      # dark border
-CLR_TEXT = "#222222"         # text colour
-CLR_SUBTITLE = "#555555"    # subtitle / annotation colour
+CLR_TEXT = "#222222"         # text color
+CLR_SUBTITLE = "#555555"    # subtitle / annotation color
 CLR_ANNOT_BG = "#F0F0F0"    # annotation box background
 
 
