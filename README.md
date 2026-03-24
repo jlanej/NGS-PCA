@@ -6,7 +6,7 @@ Principal component analysis of next-generation sequencing coverage data via ran
 
 NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
 
-1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).
+1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file. Pre-built exclusion files combine four layers: an SV blacklist, low-mappability regions (50-mer mappability track), [Database of Genomic Variants (DGV)](http://dgv.tcag.ca/) variants, and segmental duplications (see [Exclusion BED files](#exclusion-bed-files) below).
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
 3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
@@ -17,6 +17,8 @@ Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instru
 ## Step 1: Run mosdepth
 
 Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported:
+
+> **mosdepth is bundled in the container image.** If you are using the Apptainer image (see [Step 2](#step-2-run-ngs-pca)), you do not need to install mosdepth separately — invoke it via `apptainer exec`. See [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a working example.
 
 ```bash
 mosdepth -n -t 1 --by 1000 \
@@ -130,7 +132,12 @@ java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
 
 ### Exclusion BED files
 
-Pre-built exclusion BED files are provided in `resources/`:
+Pre-built exclusion BED files are provided in `resources/`. Each file merges four exclusion layers (see [`resources/GRCh38/generateExcludeBed.sh`](resources/GRCh38/generateExcludeBed.sh) for the full generation script):
+
+1. **SV blacklist** — structural variant blacklist (`sv_blacklist.bed`) from 10x Genomics.
+2. **Low-mappability regions** — regions with 50-mer mappability < 1.0 (only the 50-mer track is used in the pre-built files).
+3. **DGV variants** — all variant calls from the [Database of Genomic Variants (DGV)](http://dgv.tcag.ca/) (GRCh38, 2016-08-31 release).
+4. **Segmental duplications** — genomic super-duplications from the UCSC Genome Browser.
 
 - **WGS (GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz)
 - **WES (UKB, GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/UKB_WES/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz) — combines the WGS exclusion regions with 20 kb-buffered xgen exome targets ([source](http://biobank.ndph.ox.ac.uk/showcase/refer.cgi?id=3801)).
