@@ -294,11 +294,8 @@ def generate_diagram(output_dir: str | Path) -> None:
             color="white", zorder=4)
 
     next_items = [
-        "\u2022 Population structure & ancestry inference",
-        "\u2022 Sequencing batch-effect detection & QC",
+        "\u2022 Sequencing batch-effect detection & mitigation",
         "\u2022 Sample outlier identification",
-        "\u2022 Coverage anomaly detection (CNV screening)",
-        "\u2022 Integration with genotype PCA",
     ]
     for i, item in enumerate(next_items):
         ax.text(0, y_next + 0.16 - i * 0.18, item,
