@@ -257,6 +257,20 @@ Website: <https://www.globus.org/>
 
 ---
 
+### 4.7 GNU Parallel
+
+**Tange, O. (2011).** GNU Parallel — The command-line power tool. *;login: The USENIX Magazine*,
+36(1), 42–47.
+<https://doi.org/10.5281/zenodo.16303>
+Website: <https://www.gnu.org/software/parallel/>
+
+> **How used:** Recommended in `mosDepth/runMosDepth.sh` (as a commented example) and in the
+> main `README.md` for running mosdepth over a directory of BAM/CRAM files in parallel
+> (e.g., `parallel -j 24 "mosdepth …" ::: *.bam`). When GNU Parallel is used to generate
+> mosdepth output, please cite this reference.
+
+---
+
 ## 5. Java Libraries
 
 ### 5.1 Apache Commons Math
