@@ -118,20 +118,17 @@ This script performs four tasks:
 ### Step 1: Download + mosdepth (array job)
 
 ```bash
-sbatch 01_download_and_mosdepth.sh
+bash 01_download_and_mosdepth.sh
 ```
 
-This is a SLURM array job (`--array=1-3202%200` by default). By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
+This script first scans the manifest and checks which samples already have mosdepth output. It then submits a SLURM array job covering only the tasks that still need to run, skipping samples that are already complete. This avoids wasting queue slots on already-finished work.
+
+By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
 
 ```bash
-# Recommended throttling: max 200 concurrent tasks (default)
-sbatch --array=1-3202%200 01_download_and_mosdepth.sh
-
 # Batch 4 samples per task + throttle to 20 concurrent tasks
 export SAMPLES_PER_TASK=4
-TOTAL_SAMPLES=$(tail -n +2 "$WORK_DIR/manifest.tsv" | wc -l)
-TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
-sbatch --array=1-${TOTAL_TASKS}%20 01_download_and_mosdepth.sh
+bash 01_download_and_mosdepth.sh
 ```
 
 Each sample in the task is still processed sequentially as:
