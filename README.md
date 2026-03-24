@@ -6,7 +6,7 @@ Principal component analysis of next-generation sequencing coverage data via ran
 
 NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
 
-1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications).
+1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file (e.g., structural variant blacklists, low-mappability regions, segmental duplications, [DGV](http://dgv.tcag.ca/) structural variant calls).
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
 3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
@@ -174,7 +174,14 @@ java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
 
 ### Exclusion BED files
 
-Pre-built exclusion BED files are provided in `resources/`:
+Pre-built exclusion BED files are provided in `resources/`. The WGS BED is built from four sources (see [`resources/GRCh38/generateExcludeBed.sh`](resources/GRCh38/generateExcludeBed.sh)):
+
+| Source | Description |
+|---|---|
+| **SV blacklist** | 10x Genomics GRCh38 [`sv_blacklist.bed`](http://cf.10xgenomics.com/supp/genome/GRCh38/sv_blacklist.bed) — known problematic structural variant regions |
+| **Low-mappability regions** | GEM-tools mappability < 1.0 at 100/125/150 bp k-mers, merged across kmer lengths |
+| **DGV** | [Database of Genomic Variants](http://dgv.tcag.ca/) (GRCh38, 2016-08-31 release) — catalogued structural variant loci |
+| **Genomic SuperDups** | UCSC [genomicSuperDups](https://genome.ucsc.edu/cgi-bin/hgTrackUi?db=hg38&g=genomicSuperDups) track — segmental duplication regions |
 
 - **WGS (GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz)
 - **WES (UKB, GRCh38):** [`ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz`](https://github.com/PankratzLab/NGS-PCA/blob/master/resources/GRCh38/UKB_WES/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.xgen.sorted.merge.contig.bed.gz) — combines the WGS exclusion regions with 20 kb-buffered xgen exome targets ([source](http://biobank.ndph.ox.ac.uk/showcase/refer.cgi?id=3801)).
