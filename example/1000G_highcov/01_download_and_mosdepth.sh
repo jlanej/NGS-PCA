@@ -122,7 +122,12 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   fi
 
   echo "Submitting: sbatch --array=${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS} $(basename "${BASH_SOURCE[0]}")"
-  exec sbatch --array="${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS}" "${BASH_SOURCE[0]}"
+  echo "  SLURM logs will be written to: ${LOG_DIR}/mosdepth_<jobid>_<taskid>.{out,err}"
+  exec sbatch \
+    --output="${LOG_DIR}/mosdepth_%A_%a.out" \
+    --error="${LOG_DIR}/mosdepth_%A_%a.err" \
+    --array="${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS}" \
+    "${BASH_SOURCE[0]}"
 fi
 
 if (( SAMPLES_PER_TASK < 1 )); then
