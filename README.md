@@ -4,6 +4,18 @@ Principal component analysis of next-generation sequencing coverage data via ran
 
 ## Overview
 
+```
+  ┌─────────────┐            ┌──────────────┐             ┌─────────────────┐
+  │ BAM / CRAM  ├─mosdepth──►│ coverage per ├────────────►│ 1. Region       │◄─ excl. BED
+  │ (N samples) │            │  1 kb bins   │             │    selection    │
+  └─────────────┘            └──────────────┘             └────────┬────────┘
+                                                                   │
+  ┌──────────────────────┐  ┌───────────────────────┐  ┌───────────▼──────────┐
+  │ PCs · Loadings       │◄─┤  3. Randomized SVD    │◄─┤  2. Normalize        │
+  │ Singular values      │  │  (Halko et al. 2011)  │  │  log₂ FC + centering │
+  └──────────────────────┘  └───────────────────────┘  └──────────────────────┘
+```
+
 NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
 
 1. **Region selection** — Retain autosomal bins that do not overlap a user-provided exclusion BED file. Pre-built exclusion files combine four layers: an SV blacklist, low-mappability regions (50-mer mappability track), [Database of Genomic Variants (DGV)](http://dgv.tcag.ca/) variants, and segmental duplications (see [Exclusion BED files](#exclusion-bed-files) below).
