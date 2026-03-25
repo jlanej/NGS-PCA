@@ -14,11 +14,11 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 
 Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instructions](https://github.com/brentp/mosdepth#installation)).
 
+**mosdepth is also bundled in the container image.** If you are using the Apptainer image, mosdepth could be invoked via `apptainer exec` with no installation necessary. See [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a working example.
+
 ## Step 1: Run mosdepth
 
 Compute coverage in fixed-width bins. 1 kb (`--by 1000`) is the recommended starting point but other bin sizes are supported:
-
-> **mosdepth is also bundled in the container image.** If you are using the Apptainer image, mosdepth could be invoked via `apptainer exec`. See [`example/1000G_highcov/01_download_and_mosdepth.sh`](example/1000G_highcov/01_download_and_mosdepth.sh) for a working example.
 
 ```bash
 mosdepth -n -t 1 --by 1000 \
