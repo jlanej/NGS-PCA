@@ -5,40 +5,15 @@ Principal component analysis of next-generation sequencing coverage data via ran
 ## Overview
 
 ```
-  ┌────────────────────────────┐
-  │    BAM / CRAM  (N samples) │
-  └──────────────┬─────────────┘
-                 │  mosdepth
-                 ▼
-  ┌────────────────────────────┐
-  │  Coverage per genomic bin  │
-  │      (e.g., 1 kb bins)     │
-  └──────────────┬─────────────┘
-                 │
-                 ▼
-  ┌────────────────────────────┐
-  │   1. Region selection      │◄── exclusion BED (low-mappability,
-  │      (filter bins)         │    SV blacklist, DGV, seg-dups)
-  └──────────────┬─────────────┘
-                 │
-                 ▼
-  ┌────────────────────────────┐
-  │   2. Normalization         │
-  │   log₂ fold change +       │
-  │   per-bin centering        │
-  └──────────────┬─────────────┘
-                 │
-                 ▼
-  ┌────────────────────────────┐
-  │   3. Randomized SVD        │
-  │   (Halko et al. 2011)      │
-  └──────────────┬─────────────┘
-                 │
-                 ▼
-  ┌────────────────────────────┐
-  │  PCs · Loadings            │
-  │  Singular values           │
-  └────────────────────────────┘
+  ┌─────────────┐            ┌──────────────┐             ┌─────────────────┐
+  │ BAM / CRAM  ├─mosdepth──►│ coverage per ├────────────►│ 1. Region       │◄─ excl. BED
+  │ (N samples) │            │  1 kb bins   │             │    selection    │
+  └─────────────┘            └──────────────┘             └────────┬────────┘
+                                                                   │
+  ┌──────────────────────┐  ┌───────────────────────┐  ┌───────────▼──────────┐
+  │ PCs · Loadings       │◄─┤  3. Randomized SVD    │◄─┤  2. Normalize        │
+  │ Singular values      │  │  (Halko et al. 2011)  │  │  log₂ FC + centering │
+  └──────────────────────┘  └───────────────────────┘  └──────────────────────┘
 ```
 
 NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A bin size of 1 kb has been used historically and is recommended as a starting point, but other sizes (e.g., 500 bp or 5 kb) are equally supported. The pipeline operates in three stages:
