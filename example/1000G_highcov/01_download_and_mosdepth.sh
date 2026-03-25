@@ -48,10 +48,88 @@ module load aspera 2>/dev/null || true
 # Ensure log directory exists
 mkdir -p "${LOG_DIR}"
 
+# Returns the expected mosdepth output path for a given sample ID.
+mosdepth_output_path() {
+  echo "${MOSDEPTH_DIR}/${1}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
+}
+
 if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
-  echo "ERROR: SLURM_ARRAY_TASK_ID is not set. Submit this script as a SLURM array job."
-  exit 1
+  # ── Pre-submission mode ────────────────────────────────────────────────────
+  # When run directly (not as a SLURM array task), scan the manifest to find
+  # which samples still need mosdepth output, then submit only those tasks.
+  if [[ ! -s "${MANIFEST}" ]]; then
+    echo "ERROR: Manifest missing or empty: ${MANIFEST}"
+    echo "Run setup first: bash 00_setup.sh"
+    exit 1
+  fi
+
+  echo "Pre-submission check: scanning manifest for samples that need processing..."
+  NEEDED_TASKS=()
+  PREV_TASK_ID=""
+  SAMPLE_IDX=0
+  while IFS=$'\t' read -r SAMPLE_ID _; do
+    SAMPLE_IDX=$(( SAMPLE_IDX + 1 ))
+    MOSDEPTH_OUTPUT="$(mosdepth_output_path "${SAMPLE_ID}")"
+    if [[ ! -s "${MOSDEPTH_OUTPUT}" ]]; then
+      TASK_ID=$(( (SAMPLE_IDX - 1) / SAMPLES_PER_TASK + 1 ))
+      if [[ "${TASK_ID}" != "${PREV_TASK_ID}" ]]; then
+        NEEDED_TASKS+=("${TASK_ID}")
+        PREV_TASK_ID="${TASK_ID}"
+      fi
+    fi
+  done < <(tail -n +2 "${MANIFEST}")
+
+  TOTAL_SAMPLES=${SAMPLE_IDX}
+  TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
+  NEEDED_COUNT=${#NEEDED_TASKS[@]}
+  ALREADY_DONE=$(( TOTAL_TASKS - NEEDED_COUNT ))
+  echo "  Total samples: ${TOTAL_SAMPLES} (${TOTAL_TASKS} tasks at SAMPLES_PER_TASK=${SAMPLES_PER_TASK})"
+  echo "  Already done:  ${ALREADY_DONE} tasks"
+  echo "  To submit:     ${NEEDED_COUNT} tasks"
+
+  if [[ ${NEEDED_COUNT} -eq 0 ]]; then
+    echo "All samples already have mosdepth output. Nothing to submit."
+    exit 0
+  fi
+
+  # Build a compact SLURM array spec (e.g. "1-5,7,9-12") from the needed task IDs.
+  ARRAY_SPEC=""
+  RANGE_START=""
+  PREV_ID=""
+  for TASK_ID in "${NEEDED_TASKS[@]}"; do
+    if [[ -z "${PREV_ID}" ]]; then
+      RANGE_START="${TASK_ID}"
+      PREV_ID="${TASK_ID}"
+    elif (( TASK_ID == PREV_ID + 1 )); then
+      PREV_ID="${TASK_ID}"
+    else
+      [[ -n "${ARRAY_SPEC}" ]] && ARRAY_SPEC+=","
+      if [[ "${RANGE_START}" == "${PREV_ID}" ]]; then
+        ARRAY_SPEC+="${RANGE_START}"
+      else
+        ARRAY_SPEC+="${RANGE_START}-${PREV_ID}"
+      fi
+      RANGE_START="${TASK_ID}"
+      PREV_ID="${TASK_ID}"
+    fi
+  done
+  # Flush the final range.
+  [[ -n "${ARRAY_SPEC}" ]] && ARRAY_SPEC+=","
+  if [[ "${RANGE_START}" == "${PREV_ID}" ]]; then
+    ARRAY_SPEC+="${RANGE_START}"
+  else
+    ARRAY_SPEC+="${RANGE_START}-${PREV_ID}"
+  fi
+
+  echo "Submitting: sbatch --array=${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS} $(basename "${BASH_SOURCE[0]}")"
+  echo "  SLURM logs will be written to: ${LOG_DIR}/mosdepth_<jobid>_<taskid>.{out,err}"
+  exec sbatch \
+    --output="${LOG_DIR}/mosdepth_%A_%a.out" \
+    --error="${LOG_DIR}/mosdepth_%A_%a.err" \
+    --array="${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS}" \
+    "${BASH_SOURCE[0]}"
 fi
+
 if (( SAMPLES_PER_TASK < 1 )); then
   echo "ERROR: SAMPLES_PER_TASK must be >= 1 (got: ${SAMPLES_PER_TASK})."
   exit 1
@@ -163,11 +241,11 @@ process_manifest_line() {
   echo " Started: $(date)"
   echo "============================================================"
 
-  # ── Skip if mosdepth output already exists ─────────────────────────────────
-  MOSDEPTH_OUTPUT="${MOSDEPTH_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
+  # ── Skip if mosdepth output already exists and is non-empty ──────────────────
+  MOSDEPTH_OUTPUT="$(mosdepth_output_path "${SAMPLE_ID}")"
   LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
   LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
-  if [[ -f "${MOSDEPTH_OUTPUT}" ]]; then
+  if [[ -s "${MOSDEPTH_OUTPUT}" ]]; then
     echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
     rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
     return 0
