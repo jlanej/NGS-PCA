@@ -72,13 +72,15 @@ jobs:
 
       - name: Build with Maven
         working-directory: ngspca
-        run: mvn -B package --file pom.xml
+        run: |
+          mvn -B package --file pom.xml
+          cp target/ngspca-*.jar target/ngspca.jar
 
       - name: Run NGS-PCA (UNIFORM distribution)
         working-directory: example
         run: |
           mkdir -p test_output
-          java -jar ../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+          java -jar ../ngspca/target/ngspca.jar \
             -input input.files.txt \
             -outputDir test_output/ \
             -numPC 2 \
@@ -93,7 +95,7 @@ jobs:
         working-directory: example
         run: |
           mkdir -p test_output_gaussian
-          java -jar ../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+          java -jar ../ngspca/target/ngspca.jar \
             -input input.files.txt \
             -outputDir test_output_gaussian/ \
             -numPC 2 \
