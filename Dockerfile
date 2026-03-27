@@ -2,7 +2,8 @@ FROM maven:3.9-eclipse-temurin-11 AS build
 WORKDIR /app/ngspca
 COPY ngspca/pom.xml .
 COPY ngspca/src ./src
-RUN mvn install
+RUN mvn -B package \
+ && cp "$(ls target/ngspca-*.jar | grep -v 'original-' | head -n 1)" target/ngspca.jar
 
 FROM eclipse-temurin:11-jre-jammy
 WORKDIR /app
@@ -17,7 +18,7 @@ RUN chmod +x /usr/local/bin/mosdepth
 
 # --- NGS-PCA application ------------------------------------------------
 
-COPY --from=build /app/ngspca/target/ngspca-0.02-SNAPSHOT.jar /app
+COPY --from=build /app/ngspca/target/ngspca.jar /app/ngspca.jar
 COPY resources /app/resources
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=90.0"
-ENTRYPOINT ["java", "-jar","ngspca-0.02-SNAPSHOT.jar"]
+ENTRYPOINT ["java", "-jar","ngspca.jar"]
