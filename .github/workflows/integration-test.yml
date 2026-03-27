@@ -74,7 +74,7 @@ jobs:
         working-directory: ngspca
         run: |
           mvn -B package --file pom.xml
-          cp "$(ls target/ngspca-*.jar | grep -v 'original-' | head -n 1)" target/ngspca.jar
+          cp target/ngspca-*.jar target/ngspca.jar
 
       - name: Run NGS-PCA (UNIFORM distribution)
         working-directory: example

@@ -3,7 +3,7 @@ WORKDIR /app/ngspca
 COPY ngspca/pom.xml .
 COPY ngspca/src ./src
 RUN mvn -B package \
- && cp "$(ls target/ngspca-*.jar | grep -v 'original-' | head -n 1)" target/ngspca.jar
+ && cp target/ngspca-*.jar target/ngspca.jar
 
 FROM eclipse-temurin:11-jre-jammy
 WORKDIR /app
