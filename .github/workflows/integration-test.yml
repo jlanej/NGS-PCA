@@ -187,7 +187,7 @@ jobs:
             -v "$(pwd)/exampleMosdepth_1000G_chr1:/input:ro" \
             -v "$(pwd)/test_output_docker:/output" \
             -v "$(pwd)/../resources:/app/resources:ro" \
-            -e JAVA_TOOL_OPTIONS="-Xmx512m" \
+            -e JAVA_TOOL_OPTIONS="-Xmx2g" \
             ngspca:ci-test \
             -input /input/ \
             -outputDir /output/ \
