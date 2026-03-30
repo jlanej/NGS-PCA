@@ -185,15 +185,17 @@ if [[ ! -f "${PANEL_FILE}" ]]; then
 else
   PANEL_TSV="${QC_OUTPUT}/.panel_extracted.tmp"
   # Extract relevant columns from PED file (tab-separated, skip header if present)
-  # Also derive relatedness: if paternal_id ($3) and maternal_id ($4) are both "0" → unrelated
+  # Also derive relatedness: if paternal_id ($3) and maternal_id ($4) are both
+  # "0" or empty → unrelated (standard PED convention for unknown parents).
   awk 'NR > 1 {
     sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    rel_label = ($3 == "0" && $4 == "0") ? "unrelated" : "related"
+    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
     print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}" 2>/dev/null || \
+  # Fallback: some PED files lack a header line — process all rows
   awk '{
     sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    rel_label = ($3 == "0" && $4 == "0") ? "unrelated" : "related"
+    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
     print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}"
 
