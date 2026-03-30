@@ -21,4 +21,4 @@ RUN chmod +x /usr/local/bin/mosdepth
 COPY --from=build /app/ngspca/target/ngspca.jar /app/ngspca.jar
 COPY resources /app/resources
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=90.0"
-ENTRYPOINT ["java", "-jar","ngspca.jar"]
+ENTRYPOINT ["java", "-jar", "/app/ngspca.jar"]

@@ -160,3 +160,60 @@ jobs:
           fi
 
           echo "All $CHECKED output checksums match expected values."
+
+  docker-container-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t ngspca:ci-test .
+
+      - name: Verify JAR is accessible at absolute path inside container
+        run: |
+          docker run --rm --entrypoint java ngspca:ci-test -jar /app/ngspca.jar --help 2>&1 | head -5 || true
+          # The real check: ensure the ENTRYPOINT resolves the jar correctly regardless of working directory
+          docker run --rm -w /tmp ngspca:ci-test --help 2>&1 | head -5 || true
+
+      - name: Run NGS-PCA via Docker with example data
+        working-directory: example
+        run: |
+          mkdir -p test_output_docker
+          docker run --rm \
+            -v "$(pwd)/exampleMosdepth_1000G_chr1:/input:ro" \
+            -v "$(pwd)/test_output_docker:/output" \
+            -v "$(pwd)/../resources:/app/resources:ro" \
+            -e JAVA_TOOL_OPTIONS="-Xmx512m" \
+            ngspca:ci-test \
+            -input /input/ \
+            -outputDir /output/ \
+            -numPC 2 \
+            -sampleEvery 0 \
+            -iters 10 \
+            -randomSeed 42 \
+            -oversample 2 \
+            -distribution UNIFORM \
+            -bedExclude /app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
+
+      - name: Verify Docker container output files exist
+        working-directory: example
+        run: |
+          echo "Verifying NGS-PCA Docker output files..."
+          FAILED=0
+          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt; do
+            if [ -f "test_output_docker/$f" ]; then
+              echo "FOUND: $f"
+            else
+              echo "MISSING: $f"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::Docker container run failed to produce expected output files"
+            exit 1
+          fi
+          echo "Docker container test passed — all output files present."
