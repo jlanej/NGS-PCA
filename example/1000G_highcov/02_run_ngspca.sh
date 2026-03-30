@@ -54,6 +54,7 @@ echo "   randomSeed   = ${RANDOM_SEED}"
 echo "   threads      = ${NGSPCA_THREADS}"
 echo "   sampleEvery  = ${SAMPLE_EVERY}"
 echo "   bedExclude   = ${BED_EXCLUDE}"
+echo "   xmx          = ${XMX}"
 echo ""
 echo " Started: $(date)"
 echo ""
@@ -79,6 +80,7 @@ echo "Running NGS-PCA..."
 apptainer run \
   --bind "${MOSDEPTH_DIR}":/mosdepth \
   --bind "${NGSPCA_OUTPUT}":/output \
+  --env "JAVA_TOOL_OPTIONS=-Xmx${XMX}" \
   "${SIF_IMAGE}" \
   -input /mosdepth/ \
   -outputDir /output/ \
