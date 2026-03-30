@@ -22,6 +22,15 @@
 #        - Population (e.g. GBR, YRI, CHB)
 #        - Superpopulation (AFR, AMR, EAS, EUR, SAS)
 #        - Reported sex
+#        - Relatedness (unrelated vs related, from paternal/maternal IDs)
+#
+#   4. Sample manifest (manifest.tsv) — built during setup from the two NYGC
+#      sequence.index files.  Provides batch-level annotations:
+#        - Release batch (2504 vs 698)
+#        - Sequencing center
+#        - Study ID
+#        - Instrument model
+#        - Library name
 #
 # Output:
 #   $QC_OUTPUT/sample_qc.tsv — one row per sample, ready to join with
@@ -60,6 +69,7 @@ echo ""
 echo " mosdepth summaries: ${MOSDEPTH_DIR}/*${MOSDEPTH_SUMMARY_SUFFIX}"
 echo " BAS files:          ${BAS_DIR}/*.bam.bas"
 echo " Sample panel:       ${PANEL_FILE}"
+echo " Manifest:           ${MANIFEST}"
 echo " Output:             ${OUT_TSV}"
 echo ""
 
@@ -164,34 +174,40 @@ echo "  Processed ${FOUND} samples (${MISSING_BAS} missing BAS files)."
 
 # ── Join with IGSR sample panel ──────────────────────────────────────────────
 # The PED file columns: family_id sample_id paternal maternal sex phenotype pop superpop
-# We extract: sample_id, pop, superpop, reported_sex (1=male,2=female)
+# We extract: sample_id, pop, superpop, reported_sex (1=male,2=female),
+# and relatedness (paternal_id and maternal_id both "0" → unrelated).
 echo "Joining with sample panel metadata..."
 
 if [[ ! -f "${PANEL_FILE}" ]]; then
   echo "  WARNING: Sample panel not found at ${PANEL_FILE}."
   echo "  Run 00_setup.sh to download it, or set PANEL_FILE."
-  echo "  Skipping population/sex annotation."
+  echo "  Skipping population/sex/relatedness annotation."
 else
   PANEL_TSV="${QC_OUTPUT}/.panel_extracted.tmp"
   # Extract relevant columns from PED file (tab-separated, skip header if present)
+  # Also derive relatedness: if paternal_id ($3) and maternal_id ($4) are both
+  # "0" or empty → unrelated (standard PED convention for unknown parents).
   awk 'NR > 1 {
     sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    print $2 "\t" $7 "\t" $8 "\t" sex_label
+    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
+    print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}" 2>/dev/null || \
+  # Fallback: some PED files lack a header line — process all rows
   awk '{
     sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    print $2 "\t" $7 "\t" $8 "\t" sex_label
+    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
+    print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}"
 
   # Join QC table with panel on SAMPLE_ID (column 1)
   MERGED_TSV="${QC_OUTPUT}/.merged.tmp"
-  echo -e "SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX\tPCT_MAPPED\tPCT_DUPLICATE\tTOTAL_BASES\tPOPULATION\tSUPERPOPULATION\tREPORTED_SEX" \
+  echo -e "SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX\tPCT_MAPPED\tPCT_DUPLICATE\tTOTAL_BASES\tPOPULATION\tSUPERPOPULATION\tREPORTED_SEX\tRELATEDNESS" \
     > "${MERGED_TSV}"
 
   # Use awk join: load panel into associative array, then annotate QC rows
-  awk 'BEGIN { OFS="\t" }
+  awk -F'\t' 'BEGIN { OFS="\t" }
     NR == FNR {
-      pop[$1] = $2; super[$1] = $3; sex[$1] = $4
+      pop[$1] = $2; super[$1] = $3; sex[$1] = $4; rel[$1] = $5
       next
     }
     FNR == 1 { next }   # skip QC header
@@ -200,13 +216,63 @@ else
       p  = (sid in pop)   ? pop[sid]   : "NA"
       s  = (sid in super) ? super[sid] : "NA"
       sx = (sid in sex)   ? sex[sid]   : "NA"
-      print $0, p, s, sx
+      r  = (sid in rel)   ? rel[sid]   : "NA"
+      print $0, p, s, sx, r
     }
   ' "${PANEL_TSV}" "${OUT_TSV}" >> "${MERGED_TSV}"
 
   mv "${MERGED_TSV}" "${OUT_TSV}"
   rm -f "${PANEL_TSV}"
-  echo "  Population metadata joined."
+  echo "  Population/sex/relatedness metadata joined."
+fi
+
+# ── Join with manifest batch annotations ─────────────────────────────────────
+# The manifest (built by 00_setup.sh) contains batch-level metadata parsed from
+# the sequence.index files: RELEASE_BATCH, CENTER_NAME, STUDY_ID,
+# INSTRUMENT_MODEL, LIBRARY_NAME.
+echo "Joining with manifest batch annotations..."
+
+if [[ ! -f "${MANIFEST}" ]]; then
+  echo "  WARNING: Manifest not found at ${MANIFEST}."
+  echo "  Run 00_setup.sh to generate it, or set MANIFEST."
+  echo "  Skipping batch annotations."
+else
+  MANIFEST_TSV="${QC_OUTPUT}/.manifest_extracted.tmp"
+  # Extract batch columns from manifest (skip header)
+  # Manifest columns: SAMPLE_ID(1) CRAM_FTP_URL(2) CRAI_FTP_URL(3) CRAM_MD5(4)
+  #   RELEASE_BATCH(5) CENTER_NAME(6) STUDY_ID(7) INSTRUMENT_MODEL(8) LIBRARY_NAME(9)
+  awk -F'\t' 'NR > 1 && $1 != "" {
+    print $1 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9
+  }' OFS='\t' "${MANIFEST}" > "${MANIFEST_TSV}"
+
+  # Determine current header and append new column names
+  CURRENT_HEADER="$(head -1 "${OUT_TSV}")"
+  MERGED_TSV="${QC_OUTPUT}/.merged_batch.tmp"
+  echo -e "${CURRENT_HEADER}\tRELEASE_BATCH\tCENTER_NAME\tSTUDY_ID\tINSTRUMENT_MODEL\tLIBRARY_NAME" \
+    > "${MERGED_TSV}"
+
+  # Use awk join: load manifest batch data, then annotate QC rows
+  awk -F'\t' 'BEGIN { OFS="\t" }
+    NR == FNR {
+      batch[$1]  = $2; center[$1] = $3; study[$1] = $4
+      inst[$1]   = $5; lib[$1]    = $6
+      next
+    }
+    FNR == 1 { next }   # skip QC header
+    {
+      sid = $1
+      b  = (sid in batch)  ? batch[sid]  : "NA"
+      c  = (sid in center) ? center[sid] : "NA"
+      st = (sid in study)  ? study[sid]  : "NA"
+      i  = (sid in inst)   ? inst[sid]   : "NA"
+      l  = (sid in lib)    ? lib[sid]    : "NA"
+      print $0, b, c, st, i, l
+    }
+  ' "${MANIFEST_TSV}" "${OUT_TSV}" >> "${MERGED_TSV}"
+
+  mv "${MERGED_TSV}" "${OUT_TSV}"
+  rm -f "${MANIFEST_TSV}"
+  echo "  Batch annotations joined."
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

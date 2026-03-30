@@ -45,10 +45,10 @@ validate_manifest() {
 
   local header
   header="$(head -n1 "${manifest_file}")"
-  if [[ "${header}" != $'SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5' ]]; then
+  if [[ "${header}" != $'SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5\tRELEASE_BATCH\tCENTER_NAME\tSTUDY_ID\tINSTRUMENT_MODEL\tLIBRARY_NAME' ]]; then
     echo "ERROR: Manifest header is invalid:"
     echo "  got:      ${header}"
-    echo "  expected: SAMPLE_ID<TAB>CRAM_FTP_URL<TAB>CRAI_FTP_URL<TAB>CRAM_MD5"
+    echo "  expected: SAMPLE_ID<TAB>CRAM_FTP_URL<TAB>CRAI_FTP_URL<TAB>CRAM_MD5<TAB>RELEASE_BATCH<TAB>CENTER_NAME<TAB>STUDY_ID<TAB>INSTRUMENT_MODEL<TAB>LIBRARY_NAME"
     exit 1
   fi
 
@@ -173,28 +173,43 @@ else
   fi
 
   # Parse both sequence.index files into a unified manifest:
-  #   SAMPLE_ID  CRAM_FTP_URL  CRAI_FTP_URL  CRAM_MD5
+  #   SAMPLE_ID  CRAM_FTP_URL  CRAI_FTP_URL  CRAM_MD5  RELEASE_BATCH
+  #   CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
   #
-  # sequence.index columns (tab-separated):
+  # sequence.index columns (tab-separated, ENA/IGSR format):
   #   1: ENA_FILE_PATH (CRAM URL on ftp.sra.ebi.ac.uk)
   #   2: MD5SUM
+  #   4: STUDY_ID
+  #   6: CENTER_NAME
   #  10: SAMPLE_NAME
-  echo -e "SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5" > "${MANIFEST}"
+  #  14: INSTRUMENT_MODEL
+  #  15: LIBRARY_NAME
+  echo -e "SAMPLE_ID\tCRAM_FTP_URL\tCRAI_FTP_URL\tCRAM_MD5\tRELEASE_BATCH\tCENTER_NAME\tSTUDY_ID\tINSTRUMENT_MODEL\tLIBRARY_NAME" > "${MANIFEST}"
 
   for idx_file in "${INDEX_FILE_2504}" "${INDEX_FILE_698}"; do
     if [[ ! -s "${idx_file}" ]]; then
       echo "  ERROR: Index file missing or empty: ${idx_file}"
       exit 1
     fi
-    awk -F'\t' '
+    # Tag samples with their release batch based on source index file
+    if [[ "${idx_file}" == "${INDEX_FILE_2504}" ]]; then
+      batch_tag="2504"
+    else
+      batch_tag="698"
+    fi
+    awk -F'\t' -v batch="${batch_tag}" '
       /^#/ { next }
       $1 ~ /\.cram$/ {
         sample = $10
         cram   = $1
         md5    = $2
         crai   = cram ".crai"
+        center = ($6  != "") ? $6  : "NA"
+        study  = ($4  != "") ? $4  : "NA"
+        inst   = ($14 != "") ? $14 : "NA"
+        lib    = ($15 != "") ? $15 : "NA"
         if (sample != "" && cram != "")
-          print sample "\t" cram "\t" crai "\t" md5
+          print sample "\t" cram "\t" crai "\t" md5 "\t" batch "\t" center "\t" study "\t" inst "\t" lib
       }
     ' "${idx_file}"
   done >> "${MANIFEST}"
