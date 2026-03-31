@@ -55,10 +55,35 @@ INDEX_FILE_698="${INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.se
 #
 # NOTE: HTTPS URLs are preferred over FTP (more reliable, avoids firewall issues).
 # The EBI mirrors all FTP content at https://ftp.1000genomes.ebi.ac.uk/...
+#
+# IMPORTANT: The EBI FTP has historically moved these files between the top-level
+# data collection directory and a "working" subdirectory.  We try multiple URL
+# patterns in 03_collect_qc.sh (see ALIGNMENT_INDEX_FALLBACK_URLS_*) and also
+# fall back to a bundled copy committed in this repository.
 ALIGNMENT_INDEX_URL_2504="${ALIGNMENT_INDEX_URL_2504:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
 ALIGNMENT_INDEX_URL_698="${ALIGNMENT_INDEX_URL_698:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
+# Fallback URLs — tried if the primary URL fails (e.g. file moved to working/ dir)
+ALIGNMENT_INDEX_FALLBACK_URLS_2504=(
+  "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_2504_high_coverage.GRCh38DH.alignment.index"
+  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index"
+  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_2504_high_coverage.GRCh38DH.alignment.index"
+  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index"
+  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/alignment_indices/1000G_2504_high_coverage.GRCh38DH.alignment.index"
+)
+ALIGNMENT_INDEX_FALLBACK_URLS_698=(
+  "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
+  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
+  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
+  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
+  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/alignment_indices/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
+)
 ALIGNMENT_INDEX_FILE_2504="${ALIGNMENT_INDEX_FILE_2504:-${WORK_DIR}/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
 ALIGNMENT_INDEX_FILE_698="${ALIGNMENT_INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
+
+# Bundled alignment index — committed to this repo (IGSR pilot, 24 samples).
+# Used as a last-resort fallback when no remote alignment index can be downloaded.
+# Located relative to the script directory.
+BUNDLED_ALIGNMENT_INDEX_DIR="${BUNDLED_ALIGNMENT_INDEX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/data}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
 EXPECTED_MANIFEST_SAMPLES="${EXPECTED_MANIFEST_SAMPLES:-3202}"
 MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES:-3000}"

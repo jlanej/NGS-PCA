@@ -83,6 +83,33 @@ ftp_to_https() {
   echo "${url}" | sed 's|^ftp://|https://|'
 }
 
+# ── Helper: validate alignment index content ────────────────────────────────
+# Checks that a downloaded file is a valid alignment index (TSV with BAS URLs)
+# and NOT an HTML error page (e.g. "404 Not Found" served with HTTP 200).
+validate_alignment_index() {
+  local file="$1"
+  [[ ! -s "${file}" ]] && return 1
+  # Reject files that contain HTML tags (error pages served by web servers)
+  if head -5 "${file}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
+    echo "    REJECTED: file contains HTML (likely an error page, not a TSV index)"
+    return 1
+  fi
+  # A valid alignment index should have tab-separated lines with BAS URLs
+  # (comment lines start with #, data lines have 6 tab-separated fields)
+  local data_lines
+  data_lines=$(grep -cvE '^#|^$' "${file}" 2>/dev/null || echo "0")
+  if [[ "${data_lines}" -eq 0 ]]; then
+    echo "    REJECTED: no data lines found in alignment index"
+    return 1
+  fi
+  # Check that at least one line has a .bas reference in column 5
+  if ! awk -F'\t' '/^[^#]/ && $5 ~ /\.bas/ { found=1; exit } END { exit !found }' "${file}" 2>/dev/null; then
+    echo "    REJECTED: no .bas URLs found in column 5"
+    return 1
+  fi
+  return 0
+}
+
 echo "============================================================"
 echo " Collecting per-sample QC"
 echo "============================================================"
@@ -102,45 +129,85 @@ download_bas_files() {
   echo "Checking for BAS files to download..."
 
   local alignment_indices=()
-  for idx_url_var in ALIGNMENT_INDEX_URL_2504 ALIGNMENT_INDEX_URL_698; do
+
+  # ── Try each alignment index (2504 and 698) ──
+  for idx_suffix in 2504 698; do
+    local idx_url_var="ALIGNMENT_INDEX_URL_${idx_suffix}"
     local idx_url="${!idx_url_var}"
     [[ -z "${idx_url}" ]] && continue
-    local idx_file_var="${idx_url_var/URL/FILE}"
+    local idx_file_var="ALIGNMENT_INDEX_FILE_${idx_suffix}"
     local idx_file="${!idx_file_var}"
     [[ -z "${idx_file}" ]] && continue
 
-    if [[ ! -s "${idx_file}" ]]; then
-      echo "  Downloading alignment index: ${idx_url}"
-      # Try HTTPS first (more reliable), then fall back to original URL
-      local https_url
-      https_url="$(ftp_to_https "${idx_url}")"
-      local downloaded_idx=0
-      if curl -sSL --max-time 60 -o "${idx_file}" "${https_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
-        echo "    Downloaded (HTTPS): ${idx_file}"
-        downloaded_idx=1
-      elif wget -q --timeout=60 -O "${idx_file}" "${https_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
-        echo "    Downloaded (wget HTTPS): ${idx_file}"
-        downloaded_idx=1
-      fi
-      # If HTTPS didn't work and the original URL differs, try the original
-      if [[ "${downloaded_idx}" -eq 0 && "${https_url}" != "${idx_url}" ]]; then
-        if curl -sSL --max-time 60 -o "${idx_file}" "${idx_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
-          echo "    Downloaded (original URL): ${idx_file}"
-          downloaded_idx=1
-        elif wget -q --timeout=60 -O "${idx_file}" "${idx_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
-          echo "    Downloaded (wget original): ${idx_file}"
-          downloaded_idx=1
-        fi
-      fi
-      if [[ "${downloaded_idx}" -eq 0 ]]; then
-        rm -f "${idx_file}"
-        echo "    WARNING: Could not download alignment index from ${idx_url}"
-        echo "    BAS files for this batch will be skipped."
-        continue
-      fi
-    else
-      echo "  Alignment index already present: ${idx_file}"
+    # If the file already exists and is valid, use it
+    if [[ -s "${idx_file}" ]] && validate_alignment_index "${idx_file}"; then
+      echo "  Alignment index already present and valid: ${idx_file}"
+      alignment_indices+=("${idx_file}")
+      continue
     fi
+
+    # If the file exists but is invalid (e.g. HTML error page), remove it
+    if [[ -s "${idx_file}" ]]; then
+      echo "  Existing alignment index is invalid (possibly an HTML error page), re-downloading..."
+      rm -f "${idx_file}"
+    fi
+
+    echo "  Downloading alignment index for ${idx_suffix}-sample set..."
+
+    # Build list of URLs to try: primary, HTTPS variant, then fallback URLs
+    local urls_to_try=()
+    local https_url
+    https_url="$(ftp_to_https "${idx_url}")"
+    urls_to_try+=("${https_url}")
+    [[ "${https_url}" != "${idx_url}" ]] && urls_to_try+=("${idx_url}")
+
+    # Add fallback URLs (e.g. working/ subdirectory, FTP variants)
+    local fallback_var="ALIGNMENT_INDEX_FALLBACK_URLS_${idx_suffix}[@]"
+    if [[ -n "${!fallback_var+x}" ]]; then
+      for fb_url in "${!fallback_var}"; do
+        urls_to_try+=("${fb_url}")
+      done
+    fi
+
+    local downloaded_idx=0
+    for try_url in "${urls_to_try[@]}"; do
+      echo "    Trying: ${try_url}"
+      if curl -sSL --fail --max-time 60 -o "${idx_file}" "${try_url}" 2>/dev/null && validate_alignment_index "${idx_file}"; then
+        echo "    Downloaded and validated: ${idx_file}"
+        downloaded_idx=1
+        break
+      elif wget -q --timeout=60 -O "${idx_file}" "${try_url}" 2>/dev/null && validate_alignment_index "${idx_file}"; then
+        echo "    Downloaded and validated (wget): ${idx_file}"
+        downloaded_idx=1
+        break
+      else
+        rm -f "${idx_file}"
+      fi
+    done
+
+    # Last resort: try bundled alignment index from the repo
+    if [[ "${downloaded_idx}" -eq 0 ]]; then
+      local bundled_dir="${BUNDLED_ALIGNMENT_INDEX_DIR:-${SCRIPT_DIR}/data}"
+      if [[ -d "${bundled_dir}" ]]; then
+        # Look for any alignment index file in the bundled directory
+        for bundled_file in "${bundled_dir}"/*.alignment.index; do
+          if [[ -f "${bundled_file}" ]] && validate_alignment_index "${bundled_file}"; then
+            echo "    Using bundled alignment index: ${bundled_file}"
+            cp "${bundled_file}" "${idx_file}"
+            downloaded_idx=1
+            break
+          fi
+        done
+      fi
+    fi
+
+    if [[ "${downloaded_idx}" -eq 0 ]]; then
+      echo "    WARNING: Could not download or find a valid alignment index for ${idx_suffix}-sample set."
+      echo "    Tried ${#urls_to_try[@]} remote URLs and local fallback."
+      echo "    BAS files for this batch will be skipped."
+      continue
+    fi
+
     [[ -s "${idx_file}" ]] && alignment_indices+=("${idx_file}")
   done
 
@@ -193,9 +260,18 @@ download_bas_files() {
     [[ "${https_bas_url}" != "${bas_url}" ]] && urls_to_try+=("${bas_url}")
     local dl_ok=0
     for try_url in "${urls_to_try[@]}"; do
-      if curl -sSL --max-time 60 -o "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+      if curl -sSL --fail --max-time 60 -o "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        # Validate BAS file is not an HTML error page
+        if head -2 "${dest}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
+          rm -f "${dest}"
+          continue
+        fi
         dl_ok=1; break
       elif wget -q --timeout=60 -O "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        if head -2 "${dest}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
+          rm -f "${dest}"
+          continue
+        fi
         dl_ok=1; break
       fi
     done
