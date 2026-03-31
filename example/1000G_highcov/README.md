@@ -233,6 +233,10 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **X coverage ratio** (X/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Y coverage ratio** (Y/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Inferred sex** (M/F from coverage) | Derived from X/Y ratios | Free — derived automatically |
+| **Mitochondrial coverage ratio** (chrM/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
+| **Median genome coverage** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
+| **% genome ≥ 10× depth** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
+| **% genome ≥ 20× depth** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
 | **Total bases** (#_total_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
 | **Mapped bases** (#_mapped_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
 | **Total reads** (#_total_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
@@ -259,12 +263,13 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **Instrument model** | Manifest (sequence.index col 14) | Parsed during setup (e.g. `Illumina NovaSeq 6000`) |
 | **Library name** | Manifest (sequence.index col 15) | Parsed during setup — plate-level batch prefixes |
 
-> **BAS files** (per-readgroup alignment statistics, see [IGSR BAS format](https://www.internationalgenome.org/category/bas/)) are automatically downloaded from the NYGC alignment index files on the EBI FTP during step 3. The alignment index lists FTP paths for each sample's `.bam.bas` file. If the alignment index or individual BAS files cannot be fetched (e.g. network issues), those columns will be `NA`. You can also pre-populate `$BAS_DIR` with BAS files manually.
+> **BAS files** (per-readgroup alignment statistics, see [IGSR BAS format](https://www.internationalgenome.org/category/bas/)) are automatically downloaded from the NYGC alignment index files via HTTPS (with FTP fallback) during step 3. The alignment index lists paths for each sample's `.bam.bas` file. If the alignment index or individual BAS files cannot be fetched (e.g. network issues), those columns will be `NA`. You can also pre-populate `$BAS_DIR` with BAS files manually.
 
 #### Output table columns
 
 ```
-SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX
+SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX  MITO_COV_RATIO
+MEDIAN_GENOME_COV  PCT_GENOME_COV_10X  PCT_GENOME_COV_20X
 TOTAL_BASES  MAPPED_BASES  TOTAL_READS  MAPPED_READS
 MAPPED_READS_PAIRED  MAPPED_READS_PROPERLY_PAIRED
 PCT_MISMATCHED_BASES  AVG_QUALITY_MAPPED_BASES
