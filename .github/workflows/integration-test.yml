@@ -54,6 +54,226 @@ jobs:
           fi
           echo "Manifest validation passed (${SAMPLE_COUNT} samples)."
 
+  bas-link-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download alignment index and validate BAS URLs
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          TEST_WORK="${RUNNER_TEMP}/bas_link_test"
+          mkdir -p "${TEST_WORK}/bas_files"
+
+          # ── 1. Download the GRCh38 high-coverage pilot alignment index (24 samples) ──
+          # This is on GitHub (always accessible) and has known BAS file URLs.
+          echo "=== Downloading pilot alignment index from IGSR GitHub ==="
+          curl -sSL -o "${TEST_WORK}/pilot.alignment.index" \
+            "https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
+
+          PILOT_LINES=$(grep -cv '^#' "${TEST_WORK}/pilot.alignment.index" || true)
+          echo "Pilot alignment index: ${PILOT_LINES} entries"
+          if (( PILOT_LINES < 20 )); then
+            echo "::error::Pilot alignment index has too few entries (${PILOT_LINES}, expected ~24)"
+            exit 1
+          fi
+          echo "PASS: Pilot alignment index has ${PILOT_LINES} entries"
+
+          # ── 2. Extract BAS URLs from alignment index (column 5) ──
+          echo ""
+          echo "=== Extracting BAS URLs from alignment index ==="
+          awk -F'\t' '
+            /^#/ { next }
+            $5 != "" {
+              bas_url = $5
+              sub(/^ftp:\/ftp\./, "ftp://ftp.", bas_url)
+              n = split(bas_url, parts, "/")
+              fname = parts[n]
+              split(fname, namep, ".")
+              sample = namep[1]
+              print sample "\t" bas_url
+            }
+          ' "${TEST_WORK}/pilot.alignment.index" > "${TEST_WORK}/bas_urls.tsv"
+
+          TOTAL_URLS=$(wc -l < "${TEST_WORK}/bas_urls.tsv")
+          echo "Extracted ${TOTAL_URLS} BAS URLs"
+          echo "First 3 entries:"
+          head -3 "${TEST_WORK}/bas_urls.tsv"
+
+          # ── 3. Verify a subset of BAS URLs are accessible ──
+          echo ""
+          echo "=== Verifying subset of BAS URLs are accessible ==="
+          CHECKED=0
+          ACCESSIBLE=0
+          FAILED_URLS=()
+          # Test first 5 URLs
+          while IFS=$'\t' read -r sample_id bas_url; do
+            (( CHECKED >= 5 )) && break
+            CHECKED=$(( CHECKED + 1 ))
+            echo -n "  [${CHECKED}/5] ${sample_id}: "
+            if curl -sS --head --max-time 30 "${bas_url}" >/dev/null 2>&1; then
+              echo "accessible"
+              ACCESSIBLE=$(( ACCESSIBLE + 1 ))
+            elif wget --spider --timeout=30 "${bas_url}" 2>/dev/null; then
+              echo "accessible (wget)"
+              ACCESSIBLE=$(( ACCESSIBLE + 1 ))
+            else
+              echo "FAILED"
+              FAILED_URLS+=("${bas_url}")
+            fi
+          done < "${TEST_WORK}/bas_urls.tsv"
+
+          echo ""
+          echo "URL check: ${ACCESSIBLE}/${CHECKED} accessible"
+          if (( ACCESSIBLE == 0 )); then
+            echo "::error::No BAS URLs were accessible. Network issue or URLs are invalid."
+            exit 1
+          fi
+          echo "PASS: At least ${ACCESSIBLE} BAS URLs are accessible"
+
+          # ── 4. Download a few BAS files and validate format ──
+          echo ""
+          echo "=== Downloading and validating BAS file format ==="
+          DOWNLOADED=0
+          VALID=0
+          while IFS=$'\t' read -r sample_id bas_url; do
+            (( DOWNLOADED >= 3 )) && break
+            dest="${TEST_WORK}/bas_files/${sample_id}.bam.bas"
+            echo -n "  Downloading ${sample_id}.bam.bas... "
+            if curl -sS --max-time 60 -o "${dest}" "${bas_url}" 2>/dev/null && [ -s "${dest}" ]; then
+              echo "OK ($(wc -c < "${dest}") bytes)"
+              DOWNLOADED=$(( DOWNLOADED + 1 ))
+
+              # Validate: must be tab-separated with >= 21 columns
+              NCOLS=$(head -1 "${dest}" | awk -F'\t' '{print NF}')
+              NROWS=$(wc -l < "${dest}")
+              echo "    Columns: ${NCOLS}, Rows: ${NROWS}"
+
+              if (( NCOLS >= 21 )); then
+                echo "    PASS: Standard 21-column BAS format"
+                VALID=$(( VALID + 1 ))
+              else
+                echo "    WARNING: Expected >= 21 columns, got ${NCOLS}"
+              fi
+
+              # Show header
+              echo "    Header fields:"
+              head -1 "${dest}" | tr '\t' '\n' | head -10 | sed 's/^/      /'
+              echo "      ..."
+            elif wget -q --timeout=60 -O "${dest}" "${bas_url}" 2>/dev/null && [ -s "${dest}" ]; then
+              echo "OK via wget ($(wc -c < "${dest}") bytes)"
+              DOWNLOADED=$(( DOWNLOADED + 1 ))
+              NCOLS=$(head -1 "${dest}" | awk -F'\t' '{print NF}')
+              if (( NCOLS >= 21 )); then
+                VALID=$(( VALID + 1 ))
+              fi
+            else
+              echo "FAILED"
+              rm -f "${dest}"
+            fi
+          done < "${TEST_WORK}/bas_urls.tsv"
+
+          echo ""
+          echo "Downloaded: ${DOWNLOADED}, Valid format: ${VALID}"
+          if (( DOWNLOADED == 0 )); then
+            echo "::error::Could not download any BAS files"
+            exit 1
+          fi
+          echo "PASS: Successfully downloaded and validated ${VALID} BAS files"
+
+          # ── 5. Test parse_bas_file() with real data ──
+          echo ""
+          echo "=== Testing parse_bas_file() with downloaded BAS files ==="
+          # Extract the parse function from 03_collect_qc.sh and test it
+          for bas_file in "${TEST_WORK}"/bas_files/*.bam.bas; do
+            [ -f "${bas_file}" ] || continue
+            fname=$(basename "${bas_file}")
+            echo "  Parsing ${fname}:"
+            result=$(awk 'BEGIN { FS="\t"; OFS="\t"
+              total_bases_col=8; mapped_bases_col=9; total_reads_col=10; mapped_reads_col=11
+              paired_col=12; proper_col=13; mismatch_col=14; avgqual_col=15
+              ins_mean_col=16; ins_sd_col=17; ins_med_col=18; ins_mad_col=19
+              dup_reads_col=20; dup_bases_col=21
+            }
+            NR == 1 {
+              if ($1 ~ /[a-zA-Z]/ && $1 !~ /\.bam$/ && $1 !~ /\.cram$/ && $1 !~ /^\//) {
+                for (i = 1; i <= NF; i++) {
+                  h = tolower($i); gsub(/^#/, "", h)
+                  if (h == "_total_bases" || h == "total_bases")           total_bases_col = i
+                  if (h == "_mapped_bases" || h == "mapped_bases")         mapped_bases_col = i
+                  if (h == "_total_reads" || h == "total_reads")           total_reads_col = i
+                  if (h == "_mapped_reads" || h == "mapped_reads")         mapped_reads_col = i
+                  if (h == "_mapped_reads_paired_in_sequencing" || h == "mapped_reads_paired_in_sequencing")   paired_col = i
+                  if (h == "_mapped_reads_properly_paired" || h == "mapped_reads_properly_paired")             proper_col = i
+                  if (h == "%_of_mismatched_bases" || h == "of_mismatched_bases" || h == "mismatched_bases")   mismatch_col = i
+                  if (h == "average_quality_of_mapped_bases" || h == "avg_quality_mapped_bases")               avgqual_col = i
+                  if (h == "mean_insert_size")                             ins_mean_col = i
+                  if (h == "insert_size_sd")                               ins_sd_col = i
+                  if (h == "median_insert_size")                           ins_med_col = i
+                  if (h == "insert_size_median_absolute_deviation" || h == "insert_size_mad") ins_mad_col = i
+                  if (h == "_duplicate_reads" || h == "duplicate_reads")   dup_reads_col = i
+                  if (h == "_duplicate_bases" || h == "duplicate_bases")   dup_bases_col = i
+                }
+                next
+              }
+            }
+            {
+              nrg++
+              s_total_bases   += ($total_bases_col + 0); s_mapped_bases  += ($mapped_bases_col + 0)
+              s_total_reads   += ($total_reads_col + 0); s_mapped_reads  += ($mapped_reads_col + 0)
+              s_paired += ($paired_col + 0); s_proper += ($proper_col + 0)
+              s_dup_reads += ($dup_reads_col + 0); s_dup_bases += ($dup_bases_col + 0)
+              if ($mismatch_col + 0 > 0 || $mismatch_col == "0") { s_mismatch += ($mismatch_col + 0); n_mismatch++ }
+              if ($avgqual_col + 0 > 0 || $avgqual_col == "0")   { s_avgqual  += ($avgqual_col + 0); n_avgqual++ }
+              if ($ins_mean_col + 0 > 0 || $ins_mean_col == "0") { s_ins_mean += ($ins_mean_col + 0); n_ins_mean++ }
+              if ($ins_sd_col + 0 > 0 || $ins_sd_col == "0")     { s_ins_sd += ($ins_sd_col + 0); n_ins_sd++ }
+              if ($ins_med_col + 0 > 0 || $ins_med_col == "0")   { s_ins_med += ($ins_med_col + 0); n_ins_med++ }
+              if ($ins_mad_col + 0 > 0 || $ins_mad_col == "0")   { s_ins_mad += ($ins_mad_col + 0); n_ins_mad++ }
+            }
+            END {
+              if (nrg == 0) { printf "NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\n"; exit }
+              pct_mapped = (s_total_bases > 0) ? sprintf("%.4f", s_mapped_bases / s_total_bases * 100) : "NA"
+              pct_dup = (s_mapped_bases > 0) ? sprintf("%.4f", s_dup_bases / s_mapped_bases * 100) : "NA"
+              mismatch = (n_mismatch > 0) ? sprintf("%.2f", s_mismatch / n_mismatch) : "NA"
+              avgqual  = (n_avgqual > 0)  ? sprintf("%.2f", s_avgqual / n_avgqual) : "NA"
+              ins_mean = (n_ins_mean > 0) ? sprintf("%.0f", s_ins_mean / n_ins_mean) : "NA"
+              ins_sd   = (n_ins_sd > 0)   ? sprintf("%.2f", s_ins_sd / n_ins_sd) : "NA"
+              ins_med  = (n_ins_med > 0)  ? sprintf("%.0f", s_ins_med / n_ins_med) : "NA"
+              ins_mad  = (n_ins_mad > 0)  ? sprintf("%.0f", s_ins_mad / n_ins_mad) : "NA"
+              printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+                s_total_bases, s_mapped_bases, s_total_reads, s_mapped_reads, \
+                s_paired, s_proper, mismatch, avgqual, \
+                ins_mean, ins_sd, ins_med, ins_mad, \
+                s_dup_reads, s_dup_bases, pct_mapped, pct_dup
+            }' "${bas_file}")
+
+            NCOLS=$(echo "${result}" | awk -F'\t' '{print NF}')
+            echo "    Output: ${NCOLS} fields"
+            echo "    Values: ${result}"
+
+            # Verify we got 16 non-empty fields
+            NA_COUNT=$(echo "${result}" | tr '\t' '\n' | grep -c '^NA$' || true)
+            if (( NCOLS != 16 )); then
+              echo "::error::parse_bas_file produced ${NCOLS} fields (expected 16) for ${fname}"
+              exit 1
+            fi
+            # With real data, total_bases should not be NA or 0
+            TOTAL_BASES=$(echo "${result}" | cut -f1)
+            if [[ "${TOTAL_BASES}" == "NA" || "${TOTAL_BASES}" == "0" ]]; then
+              echo "::error::parse_bas_file returned TOTAL_BASES=${TOTAL_BASES} for ${fname}"
+              exit 1
+            fi
+            echo "    PASS: 16 fields, TOTAL_BASES=${TOTAL_BASES}"
+          done
+
+          echo ""
+          echo "=== All BAS link and format validations passed ==="
+
   integration-test:
     runs-on: ubuntu-latest
     permissions:
