@@ -264,6 +264,8 @@ The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources int
 
 #### Output table columns
 
+The QC table contains 22 columns organized into 5 groups:
+
 ```
 SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX  MITO_COV_RATIO
 MEDIAN_GENOME_COV  PCT_GENOME_COV_10X  PCT_GENOME_COV_20X
@@ -271,6 +273,42 @@ SD_COV  MAD_COV  IQR_COV  MEDIAN_BIN_COV
 POPULATION  SUPERPOPULATION  REPORTED_SEX  RELATEDNESS
 RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 ```
+
+##### Column descriptions
+
+**Sample identifier**
+- `SAMPLE_ID` — Unique sample identifier (e.g. `NA12718`, `HG00096`)
+
+**Coverage metrics (mosdepth summary)**
+- `MEAN_AUTOSOMAL_COV` — Mean coverage across autosomal chromosomes (chr1–22). Weighted average of per-chromosome mean coverages. **Use case:** identify sequencing depth batch effects.
+- `X_COV_RATIO` — Ratio of chrX coverage to autosomal coverage. Males have ~0.5 (one X copy), females have ~1.0 (two X copies). **Use case:** sex inference, sample swap detection.
+- `Y_COV_RATIO` — Ratio of chrY coverage to autosomal coverage. Males have detectable Y coverage (>0.1), females have minimal Y coverage (~0). **Use case:** sex inference.
+- `INFERRED_SEX` — Genetic sex inferred from coverage ratios. `M` if Y_COV_RATIO > 0.1 and X_COV_RATIO < 0.75, otherwise `F`. **Use case:** validate against reported sex, detect sample swaps.
+- `MITO_COV_RATIO` — Ratio of chrM (mitochondrial) coverage to autosomal coverage. Typically 10–100× higher than nuclear genome. **Use case:** QC flag for mitochondrial enrichment or depletion.
+
+**Coverage distribution metrics (mosdepth global distribution)**
+- `MEDIAN_GENOME_COV` — Median depth across the entire genome (all chromosomes). More robust to outliers than mean coverage. **Use case:** assess overall sequencing depth quality.
+- `PCT_GENOME_COV_10X` — Percentage of the genome with ≥10× coverage. Standard threshold for variant calling. **Use case:** assess breadth of coverage for variant calling pipelines.
+- `PCT_GENOME_COV_20X` — Percentage of the genome with ≥20× coverage. Higher-confidence variant calling threshold. **Use case:** assess high-quality coverage breadth.
+
+**Coverage variability metrics (03a_mosdepth_coverage_summary.sh)**
+- `SD_COV` — Standard deviation of per-bin coverage across autosomal chromosomes. High SD indicates uneven coverage. **Use case:** identify library prep or sequencing quality batch effects.
+- `MAD_COV` — Median absolute deviation of per-bin coverage. Robust alternative to SD, less sensitive to outliers. **Use case:** robust measure of coverage uniformity.
+- `IQR_COV` — Interquartile range (Q3 - Q1) of per-bin coverage. Captures spread of the middle 50% of bins. **Use case:** assess coverage variability, less sensitive to extreme outliers.
+- `MEDIAN_BIN_COV` — Median coverage across autosomal bins (1 kb bins from mosdepth). Similar to `MEDIAN_GENOME_COV` but computed from binned data. **Use case:** compare to mean coverage to assess skew.
+
+**Sample metadata (IGSR panel)**
+- `POPULATION` — 3-letter population code (e.g. `GBR` = British, `YRI` = Yoruba, `CHB` = Han Chinese). 26 populations total. **Use case:** color PCA plots by ancestry, validate population stratification on PC1/PC2.
+- `SUPERPOPULATION` — Continental ancestry group: `AFR` (African), `AMR` (Admixed American), `EAS` (East Asian), `EUR` (European), `SAS` (South Asian). **Use case:** demonstrate population structure in PCA.
+- `REPORTED_SEX` — Self-reported sex from IGSR metadata (`M` or `F`). **Use case:** compare to inferred sex for QC.
+- `RELATEDNESS` — `unrelated` if both parents unknown in the pedigree (PED), otherwise `related`. **Use case:** identify related individuals (parent-offspring, siblings) that may cluster in PCA.
+
+**Sequencing batch metadata (manifest)**
+- `RELEASE_BATCH` — Data release batch: `2504` (unrelated samples) or `698` (related samples). **Use case:** identify batch effects between the two sequencing releases.
+- `CENTER_NAME` — Sequencing center (expected `NYGC` for all 1000G 30x samples). **Use case:** multi-center batch effects (not applicable for 1000G 30x).
+- `STUDY_ID` — ENA study accession (e.g. `PRJEB31736`, `PRJEB36890`). **Use case:** trace data provenance.
+- `INSTRUMENT_MODEL` — Sequencing platform (e.g. `Illumina NovaSeq 6000`). **Use case:** identify instrument-specific batch effects.
+- `LIBRARY_NAME` — Library preparation identifier, typically includes plate/batch prefix (e.g. `LP6005442-DNA_A01`). **Use case:** identify library prep batch effects.
 
 #### Joining QC with PCA results
 
