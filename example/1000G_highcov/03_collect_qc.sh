@@ -233,8 +233,8 @@ parse_bas_file() {
     has_header=0
   }
   NR == 1 {
-    # Detect header row: if first field contains letters and is not a path
-    if ($1 ~ /[a-zA-Z]/ && $1 !~ /\.bam$/ && $1 !~ /\.cram$/ && $1 !~ /^\//) {
+    # Detect header row: if first field contains letters and is not a file path
+    if ($1 ~ /[a-zA-Z]/ && $1 !~ /\.bam$/ && $1 !~ /\.cram$/ && $1 !~ /^[\/.]/) {
       has_header = 1
       # Find column indices by header name (case-insensitive)
       for (i = 1; i <= NF; i++) {

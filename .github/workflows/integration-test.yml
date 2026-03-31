@@ -111,16 +111,16 @@ jobs:
           CHECKED=0
           ACCESSIBLE=0
           FAILED_URLS=()
-          # Test first 5 URLs
+          # Test first 5 URLs (wget --spider is more reliable for FTP URLs)
           while IFS=$'\t' read -r sample_id bas_url; do
             (( CHECKED >= 5 )) && break
             CHECKED=$(( CHECKED + 1 ))
             echo -n "  [${CHECKED}/5] ${sample_id}: "
-            if curl -sS --head --max-time 30 "${bas_url}" >/dev/null 2>&1; then
+            if wget --spider --timeout=30 "${bas_url}" 2>/dev/null; then
               echo "accessible"
               ACCESSIBLE=$(( ACCESSIBLE + 1 ))
-            elif wget --spider --timeout=30 "${bas_url}" 2>/dev/null; then
-              echo "accessible (wget)"
+            elif curl -sS --max-time 30 --range 0-0 -o /dev/null "${bas_url}" 2>/dev/null; then
+              echo "accessible (curl)"
               ACCESSIBLE=$(( ACCESSIBLE + 1 ))
             else
               echo "FAILED"
