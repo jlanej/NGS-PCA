@@ -17,7 +17,6 @@ set -euo pipefail
 WORK_DIR="${WORK_DIR:-/scratch/${USER}/1000G_highcov}"
 CRAM_DIR="${CRAM_DIR:-${WORK_DIR}/crams}"
 MOSDEPTH_DIR="${MOSDEPTH_DIR:-${WORK_DIR}/mosdepth_output}"
-BAS_DIR="${BAS_DIR:-${WORK_DIR}/bas_files}"   # per-sample Picard-equivalent QC
 QC_OUTPUT="${QC_OUTPUT:-${WORK_DIR}/qc_output}"
 NGSPCA_OUTPUT="${NGSPCA_OUTPUT:-${WORK_DIR}/ngspca_output}"
 LOG_DIR="${LOG_DIR:-${WORK_DIR}/logs}"
@@ -49,41 +48,6 @@ INDEX_URL_698="${INDEX_URL_698:-ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_co
 INDEX_FILE_2504="${INDEX_FILE_2504:-${WORK_DIR}/1000G_2504_high_coverage.sequence.index}"
 INDEX_FILE_698="${INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.sequence.index}"
 
-# NYGC 30x alignment indexes — list CRAM, CRAI, and BAS file FTP paths.
-# Used by 03_collect_qc.sh to discover and download .bam.bas QC files.
-# The alignment.index format has 6 TSV columns: CRAM  CRAM_MD5  CRAI  CRAI_MD5  BAS  BAS_MD5
-#
-# NOTE: HTTPS URLs are preferred over FTP (more reliable, avoids firewall issues).
-# The EBI mirrors all FTP content at https://ftp.1000genomes.ebi.ac.uk/...
-#
-# IMPORTANT: The EBI FTP has historically moved these files between the top-level
-# data collection directory and a "working" subdirectory.  We try multiple URL
-# patterns in 03_collect_qc.sh (see ALIGNMENT_INDEX_FALLBACK_URLS_*) and also
-# fall back to a bundled copy committed in this repository.
-ALIGNMENT_INDEX_URL_2504="${ALIGNMENT_INDEX_URL_2504:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
-ALIGNMENT_INDEX_URL_698="${ALIGNMENT_INDEX_URL_698:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
-# Fallback URLs — tried if the primary URL fails (e.g. file moved to working/ dir)
-ALIGNMENT_INDEX_FALLBACK_URLS_2504=(
-  "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_2504_high_coverage.GRCh38DH.alignment.index"
-  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index"
-  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_2504_high_coverage.GRCh38DH.alignment.index"
-  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index"
-  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/alignment_indices/1000G_2504_high_coverage.GRCh38DH.alignment.index"
-)
-ALIGNMENT_INDEX_FALLBACK_URLS_698=(
-  "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
-  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
-  "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
-  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
-  "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/alignment_indices/1000G_698_related_high_coverage.GRCh38DH.alignment.index"
-)
-ALIGNMENT_INDEX_FILE_2504="${ALIGNMENT_INDEX_FILE_2504:-${WORK_DIR}/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
-ALIGNMENT_INDEX_FILE_698="${ALIGNMENT_INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
-
-# Bundled alignment index — committed to this repo (IGSR pilot, 24 samples).
-# Used as a last-resort fallback when no remote alignment index can be downloaded.
-# Located relative to the script directory.
-BUNDLED_ALIGNMENT_INDEX_DIR="${BUNDLED_ALIGNMENT_INDEX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/data}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
 EXPECTED_MANIFEST_SAMPLES="${EXPECTED_MANIFEST_SAMPLES:-3202}"
 MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES:-3000}"

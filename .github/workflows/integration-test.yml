@@ -54,7 +54,7 @@ jobs:
           fi
           echo "Manifest validation passed (${SAMPLE_COUNT} samples)."
 
-  bas-link-validation:
+  mosdepth-coverage-summary-test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -63,329 +63,184 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate HTML error page rejection (content validation)
+      - name: Test mosdepth coverage summary parsing
         working-directory: example/1000G_highcov
         run: |
           set -euo pipefail
-          TEST_WORK="${RUNNER_TEMP}/bas_link_test"
-          mkdir -p "${TEST_WORK}/bas_files" "${TEST_WORK}/qc_output"
+          TEST_WORK="${RUNNER_TEMP}/cov_summary_test"
+          mkdir -p "${TEST_WORK}/mosdepth_output" "${TEST_WORK}/qc_output"
 
-          # Source validate_alignment_index from the script
-          source <(sed -n '/^validate_alignment_index()/,/^}/p' 03_collect_qc.sh)
+          # ── Create synthetic mosdepth regions.bed.gz files ──
+          # Each file has autosomal bins with known coverage values
+          echo "=== Creating synthetic mosdepth regions data ==="
 
-          # ── Test 1: Reject HTML 404 error pages ──
-          echo "=== Test: HTML error page rejection ==="
-          cat > "${TEST_WORK}/fake_404.index" <<'EOF'
-          <h1>Not Found</h1>
-          <p>The requested URL was not found on this server.</p>
-          EOF
-          if validate_alignment_index "${TEST_WORK}/fake_404.index" 2>/dev/null; then
-            echo "::error::validate_alignment_index accepted an HTML error page!"
+          # Sample A: coverage values 10,20,30,40,50 (mean=30, median=30, sd=15.81, IQR=20)
+          {
+            printf "chr1\t0\t1000\t10\n"
+            printf "chr1\t1000\t2000\t20\n"
+            printf "chr2\t0\t1000\t30\n"
+            printf "chr2\t1000\t2000\t40\n"
+            printf "chr3\t0\t1000\t50\n"
+            printf "chrX\t0\t1000\t15\n"
+          } | gzip > "${TEST_WORK}/mosdepth_output/sampleA.by1000.regions.bed.gz"
+
+          # Sample B: uniform coverage of 25 across 4 bins
+          {
+            printf "chr1\t0\t1000\t25\n"
+            printf "chr1\t1000\t2000\t25\n"
+            printf "chr2\t0\t1000\t25\n"
+            printf "chr2\t1000\t2000\t25\n"
+          } | gzip > "${TEST_WORK}/mosdepth_output/sampleB.by1000.regions.bed.gz"
+
+          # ── Run the coverage summary script ──
+          echo "=== Running 03a_mosdepth_coverage_summary.sh ==="
+          WORK_DIR="${TEST_WORK}" \
+          MOSDEPTH_DIR="${TEST_WORK}/mosdepth_output" \
+          QC_OUTPUT="${TEST_WORK}/qc_output" \
+          bash 03a_mosdepth_coverage_summary.sh
+
+          # ── Validate output ──
+          OUT="${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
+          if [[ ! -f "${OUT}" ]]; then
+            echo "::error::Coverage summary output not found"
             exit 1
           fi
-          echo "PASS: HTML 404 error page correctly rejected"
 
-          # ── Test 2: Reject full HTML documents ──
-          cat > "${TEST_WORK}/fake_html.index" <<'EOF'
-          <!DOCTYPE html>
-          <html><body><h1>404 Not Found</h1></body></html>
-          EOF
-          if validate_alignment_index "${TEST_WORK}/fake_html.index" 2>/dev/null; then
-            echo "::error::validate_alignment_index accepted a full HTML document!"
+          echo "=== Validating coverage summary output ==="
+          cat "${OUT}"
+
+          # Check header
+          HEADER=$(head -1 "${OUT}")
+          EXPECTED_HEADER="SAMPLE_ID	MEAN_COV	MEDIAN_COV	SD_COV	MAD_COV	IQR_COV"
+          if [[ "${HEADER}" != "${EXPECTED_HEADER}" ]]; then
+            echo "::error::Header mismatch. Got: ${HEADER}"
             exit 1
           fi
-          echo "PASS: Full HTML document correctly rejected"
+          echo "PASS: Header matches expected format"
 
-          # ── Test 3: Reject empty files ──
-          touch "${TEST_WORK}/empty.index"
-          if validate_alignment_index "${TEST_WORK}/empty.index" 2>/dev/null; then
-            echo "::error::validate_alignment_index accepted an empty file!"
+          # Check we got 2 samples
+          NROWS=$(tail -n +2 "${OUT}" | wc -l)
+          if (( NROWS != 2 )); then
+            echo "::error::Expected 2 sample rows, got ${NROWS}"
             exit 1
           fi
-          echo "PASS: Empty file correctly rejected"
+          echo "PASS: Got ${NROWS} sample rows"
 
-          # ── Test 4: Accept bundled alignment index ──
-          BUNDLED="data/1000genomes.high_coverage.GRCh38DH.alignment.index"
-          if [[ -f "${BUNDLED}" ]]; then
-            if validate_alignment_index "${BUNDLED}"; then
-              echo "PASS: Bundled alignment index accepted"
-            else
-              echo "::error::validate_alignment_index rejected the bundled alignment index!"
-              exit 1
-            fi
-          else
-            echo "SKIP: No bundled alignment index found at ${BUNDLED}"
+          # Validate sampleA values (5 autosomal bins: 10,20,30,40,50)
+          SAMPLE_A=$(awk -F'\t' '$1 == "sampleA"' "${OUT}")
+          if [[ -z "${SAMPLE_A}" ]]; then
+            echo "::error::sampleA not found in output"
+            exit 1
           fi
+          MEAN_A=$(echo "${SAMPLE_A}" | cut -f2)
+          MEDIAN_A=$(echo "${SAMPLE_A}" | cut -f3)
+          echo "  sampleA: mean=${MEAN_A}, median=${MEDIAN_A}"
+
+          # Mean should be 30.0000
+          if [[ "${MEAN_A}" != "30.0000" ]]; then
+            echo "::error::sampleA mean expected 30.0000, got ${MEAN_A}"
+            exit 1
+          fi
+          echo "PASS: sampleA mean correct"
+
+          # Median should be 30.0000
+          if [[ "${MEDIAN_A}" != "30.0000" ]]; then
+            echo "::error::sampleA median expected 30.0000, got ${MEDIAN_A}"
+            exit 1
+          fi
+          echo "PASS: sampleA median correct"
+
+          # Validate sampleB values (4 bins all 25: mean=25, median=25, sd=0, mad=0, iqr=0)
+          SAMPLE_B=$(awk -F'\t' '$1 == "sampleB"' "${OUT}")
+          MEAN_B=$(echo "${SAMPLE_B}" | cut -f2)
+          SD_B=$(echo "${SAMPLE_B}" | cut -f4)
+          if [[ "${MEAN_B}" != "25.0000" ]]; then
+            echo "::error::sampleB mean expected 25.0000, got ${MEAN_B}"
+            exit 1
+          fi
+          if [[ "${SD_B}" != "0.0000" ]]; then
+            echo "::error::sampleB SD expected 0.0000, got ${SD_B}"
+            exit 1
+          fi
+          echo "PASS: sampleB values correct (uniform coverage)"
 
           echo ""
-          echo "=== All content validation tests passed ==="
+          echo "=== All mosdepth coverage summary tests passed ==="
 
-      - name: Download alignment index and validate BAS URLs
+      - name: Test QC table integration with coverage summary
         working-directory: example/1000G_highcov
         run: |
           set -euo pipefail
-          TEST_WORK="${RUNNER_TEMP}/bas_link_test"
-          mkdir -p "${TEST_WORK}/bas_files"
+          TEST_WORK="${RUNNER_TEMP}/qc_integration_test"
+          mkdir -p "${TEST_WORK}/mosdepth_output" "${TEST_WORK}/qc_output"
 
-          # Source validate_alignment_index from the script
-          source <(sed -n '/^validate_alignment_index()/,/^}/p' 03_collect_qc.sh)
+          # ── Create synthetic mosdepth summary and dist files ──
+          printf "chrom\tlength\tbases\tmean\tmin\tmax\n" > "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
+          printf "chr1\t248956422\t7468692660\t30.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
+          printf "chr2\t242193529\t7265805870\t30.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
+          printf "chrX\t156040895\t4681226850\t15.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
+          printf "chrY\t57227415\t286137075\t5.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
+          printf "chrM\t16569\t828450\t50.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
 
-          # ── 0. Try downloading NYGC alignment indexes (all 3,202 samples) ──
-          # Try multiple URL patterns — the EBI FTP has historically moved these files.
-          echo "=== Attempting to download NYGC 30x alignment indexes ==="
-          NYGC_FOUND=0
-          for idx_name in \
-            "1000G_2504_high_coverage.GRCh38DH.alignment.index" \
-            "1000G_698_related_high_coverage.GRCh38DH.alignment.index"; do
-            echo "  Looking for: ${idx_name}"
-            dest="${TEST_WORK}/${idx_name}"
-            for url_pattern in \
-              "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/${idx_name}" \
-              "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/${idx_name}" \
-              "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/${idx_name}" \
-              "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/${idx_name}" \
-              "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/${idx_name}"; do
-              echo -n "    Trying: ${url_pattern} ... "
-              if curl -sSL --fail --max-time 30 -o "${dest}" "${url_pattern}" 2>/dev/null && validate_alignment_index "${dest}"; then
-                lines=$(grep -cvE '^#|^$' "${dest}" 2>/dev/null || echo "0")
-                echo "FOUND (${lines} entries)"
-                NYGC_FOUND=$(( NYGC_FOUND + 1 ))
-                break
-              else
-                rm -f "${dest}"
-                echo "not available"
-              fi
-            done
+          printf "total\t0\t1.0000\n" > "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t10\t0.9500\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t20\t0.9000\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t30\t0.5100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t31\t0.4900\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+
+          # ── Create synthetic coverage summary ──
+          printf "SAMPLE_ID\tMEAN_COV\tMEDIAN_COV\tSD_COV\tMAD_COV\tIQR_COV\n" > "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
+          printf "testSample\t30.0000\t30.0000\t5.1234\t3.4567\t7.8901\n" >> "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
+
+          # ── Run 03_collect_qc.sh ──
+          echo "=== Running 03_collect_qc.sh ==="
+          WORK_DIR="${TEST_WORK}" \
+          MOSDEPTH_DIR="${TEST_WORK}/mosdepth_output" \
+          QC_OUTPUT="${TEST_WORK}/qc_output" \
+          PANEL_FILE="${TEST_WORK}/nonexistent_panel.ped" \
+          MANIFEST="${TEST_WORK}/nonexistent_manifest.tsv" \
+          bash 03_collect_qc.sh
+
+          # ── Validate output ──
+          OUT="${TEST_WORK}/qc_output/sample_qc.tsv"
+          if [[ ! -f "${OUT}" ]]; then
+            echo "::error::QC table output not found"
+            exit 1
+          fi
+
+          echo "=== QC table output ==="
+          cat "${OUT}"
+
+          # Verify header includes new coverage columns
+          HEADER=$(head -1 "${OUT}")
+          for col in SD_COV MAD_COV IQR_COV MEDIAN_BIN_COV; do
+            if ! echo "${HEADER}" | grep -q "${col}"; then
+              echo "::error::Missing column ${col} in header"
+              exit 1
+            fi
           done
-          echo ""
-          if (( NYGC_FOUND > 0 )); then
-            echo "INFO: Found ${NYGC_FOUND} NYGC alignment index file(s)"
+          echo "PASS: All expected columns present in header"
+
+          # Verify no BAS columns remain
+          for col in TOTAL_BASES MAPPED_BASES DUPLICATE_READS PCT_DUPLICATE; do
+            if echo "${HEADER}" | grep -q "${col}"; then
+              echo "::error::BAS column ${col} still present in header"
+              exit 1
+            fi
+          done
+          echo "PASS: No BAS columns in header"
+
+          # Verify coverage summary values were joined
+          DATA=$(tail -1 "${OUT}")
+          if echo "${DATA}" | grep -q "5.1234"; then
+            echo "PASS: Coverage summary SD_COV value joined correctly"
           else
-            echo "INFO: NYGC alignment indexes not found at any URL (they may have been removed from the FTP)."
-            echo "      The pipeline will fall back to bundled alignment indexes."
-          fi
-          echo ""
-
-          # ── 1. Use bundled or downloaded alignment index for BAS URL testing ──
-          # Prefer NYGC if available; fall back to bundled pilot (24 samples)
-          echo "=== Selecting alignment index for BAS URL testing ==="
-          ALIGNMENT_INDEX=""
-          for candidate in \
-            "${TEST_WORK}/1000G_2504_high_coverage.GRCh38DH.alignment.index" \
-            "data/1000genomes.high_coverage.GRCh38DH.alignment.index"; do
-            if [[ -f "${candidate}" ]] && validate_alignment_index "${candidate}"; then
-              ALIGNMENT_INDEX="${candidate}"
-              break
-            fi
-          done
-
-          # Last resort: download pilot from IGSR GitHub
-          if [[ -z "${ALIGNMENT_INDEX}" ]]; then
-            echo "Downloading pilot alignment index from IGSR GitHub..."
-            curl -sSL -o "${TEST_WORK}/pilot.alignment.index" \
-              "https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
-            if validate_alignment_index "${TEST_WORK}/pilot.alignment.index"; then
-              ALIGNMENT_INDEX="${TEST_WORK}/pilot.alignment.index"
-            fi
-          fi
-
-          if [[ -z "${ALIGNMENT_INDEX}" ]]; then
-            echo "::error::No valid alignment index available for testing"
+            echo "::error::Coverage summary values not found in QC table"
             exit 1
           fi
 
-          PILOT_LINES=$(grep -cvE '^#|^$' "${ALIGNMENT_INDEX}" || true)
-          echo "Using alignment index: ${ALIGNMENT_INDEX} (${PILOT_LINES} entries)"
           echo ""
-
-          # ── 2. Extract BAS URLs from alignment index (column 5) ──
-          echo "=== Extracting BAS URLs from alignment index ==="
-          awk -F'\t' '
-            /^#/ { next }
-            $5 != "" {
-              bas_url = $5
-              sub(/^ftp:\/ftp\./, "ftp://ftp.", bas_url)
-              n = split(bas_url, parts, "/")
-              fname = parts[n]
-              split(fname, namep, ".")
-              sample = namep[1]
-              print sample "\t" bas_url
-            }
-          ' "${ALIGNMENT_INDEX}" > "${TEST_WORK}/bas_urls.tsv"
-
-          TOTAL_URLS=$(wc -l < "${TEST_WORK}/bas_urls.tsv")
-          echo "Extracted ${TOTAL_URLS} BAS URLs"
-          echo "First 3 entries:"
-          head -3 "${TEST_WORK}/bas_urls.tsv"
-
-          # ── 3. Verify a subset of BAS URLs are accessible ──
-          echo ""
-          echo "=== Verifying subset of BAS URLs are accessible ==="
-          CHECKED=0
-          ACCESSIBLE=0
-          FAILED_URLS=()
-          # Test first 5 URLs (wget --spider is more reliable for FTP URLs)
-          while IFS=$'\t' read -r sample_id bas_url; do
-            (( CHECKED >= 5 )) && break
-            CHECKED=$(( CHECKED + 1 ))
-            echo -n "  [${CHECKED}/5] ${sample_id}: "
-            if wget --spider --timeout=30 "${bas_url}" 2>/dev/null; then
-              echo "accessible"
-              ACCESSIBLE=$(( ACCESSIBLE + 1 ))
-            elif curl -sS --max-time 30 --range 0-0 -o /dev/null "${bas_url}" 2>/dev/null; then
-              echo "accessible (curl)"
-              ACCESSIBLE=$(( ACCESSIBLE + 1 ))
-            else
-              echo "FAILED"
-              FAILED_URLS+=("${bas_url}")
-            fi
-          done < "${TEST_WORK}/bas_urls.tsv"
-
-          echo ""
-          echo "URL check: ${ACCESSIBLE}/${CHECKED} accessible"
-          if (( ACCESSIBLE == 0 )); then
-            echo "::error::No BAS URLs were accessible. Network issue or URLs are invalid."
-            exit 1
-          fi
-          echo "PASS: At least ${ACCESSIBLE} BAS URLs are accessible"
-
-          # ── 4. Download a few BAS files and validate format ──
-          echo ""
-          echo "=== Downloading and validating BAS file format ==="
-          DOWNLOADED=0
-          VALID=0
-          while IFS=$'\t' read -r sample_id bas_url; do
-            (( DOWNLOADED >= 3 )) && break
-            dest="${TEST_WORK}/bas_files/${sample_id}.bam.bas"
-            echo -n "  Downloading ${sample_id}.bam.bas... "
-            if curl -sS --max-time 60 -o "${dest}" "${bas_url}" 2>/dev/null && [ -s "${dest}" ]; then
-              echo "OK ($(wc -c < "${dest}") bytes)"
-              DOWNLOADED=$(( DOWNLOADED + 1 ))
-
-              # Validate: must be tab-separated with >= 21 columns
-              NCOLS=$(head -1 "${dest}" | awk -F'\t' '{print NF}')
-              NROWS=$(wc -l < "${dest}")
-              echo "    Columns: ${NCOLS}, Rows: ${NROWS}"
-
-              if (( NCOLS >= 21 )); then
-                echo "    PASS: Standard 21-column BAS format"
-                VALID=$(( VALID + 1 ))
-              else
-                echo "    WARNING: Expected >= 21 columns, got ${NCOLS}"
-              fi
-
-              # Show header
-              echo "    Header fields:"
-              head -1 "${dest}" | tr '\t' '\n' | head -10 | sed 's/^/      /'
-              echo "      ..."
-            elif wget -q --timeout=60 -O "${dest}" "${bas_url}" 2>/dev/null && [ -s "${dest}" ]; then
-              echo "OK via wget ($(wc -c < "${dest}") bytes)"
-              DOWNLOADED=$(( DOWNLOADED + 1 ))
-              NCOLS=$(head -1 "${dest}" | awk -F'\t' '{print NF}')
-              if (( NCOLS >= 21 )); then
-                VALID=$(( VALID + 1 ))
-              fi
-            else
-              echo "FAILED"
-              rm -f "${dest}"
-            fi
-          done < "${TEST_WORK}/bas_urls.tsv"
-
-          echo ""
-          echo "Downloaded: ${DOWNLOADED}, Valid format: ${VALID}"
-          if (( DOWNLOADED == 0 )); then
-            echo "::error::Could not download any BAS files"
-            exit 1
-          fi
-          echo "PASS: Successfully downloaded and validated ${VALID} BAS files"
-
-          # ── 5. Test parse_bas_file() with real data ──
-          echo ""
-          echo "=== Testing parse_bas_file() with downloaded BAS files ==="
-          # Extract the parse function from 03_collect_qc.sh and test it
-          for bas_file in "${TEST_WORK}"/bas_files/*.bam.bas; do
-            [ -f "${bas_file}" ] || continue
-            fname=$(basename "${bas_file}")
-            echo "  Parsing ${fname}:"
-            result=$(awk 'BEGIN { FS="\t"; OFS="\t"
-              total_bases_col=8; mapped_bases_col=9; total_reads_col=10; mapped_reads_col=11
-              paired_col=12; proper_col=13; mismatch_col=14; avgqual_col=15
-              ins_mean_col=16; ins_sd_col=17; ins_med_col=18; ins_mad_col=19
-              dup_reads_col=20; dup_bases_col=21
-            }
-            NR == 1 {
-              if ($1 ~ /[a-zA-Z]/ && $1 !~ /\.bam$/ && $1 !~ /\.cram$/ && $1 !~ /^\//) {
-                for (i = 1; i <= NF; i++) {
-                  h = tolower($i); gsub(/^#/, "", h)
-                  if (h == "_total_bases" || h == "total_bases")           total_bases_col = i
-                  if (h == "_mapped_bases" || h == "mapped_bases")         mapped_bases_col = i
-                  if (h == "_total_reads" || h == "total_reads")           total_reads_col = i
-                  if (h == "_mapped_reads" || h == "mapped_reads")         mapped_reads_col = i
-                  if (h == "_mapped_reads_paired_in_sequencing" || h == "mapped_reads_paired_in_sequencing")   paired_col = i
-                  if (h == "_mapped_reads_properly_paired" || h == "mapped_reads_properly_paired")             proper_col = i
-                  if (h == "%_of_mismatched_bases" || h == "of_mismatched_bases" || h == "mismatched_bases")   mismatch_col = i
-                  if (h == "average_quality_of_mapped_bases" || h == "avg_quality_mapped_bases")               avgqual_col = i
-                  if (h == "mean_insert_size")                             ins_mean_col = i
-                  if (h == "insert_size_sd")                               ins_sd_col = i
-                  if (h == "median_insert_size")                           ins_med_col = i
-                  if (h == "insert_size_median_absolute_deviation" || h == "insert_size_mad") ins_mad_col = i
-                  if (h == "_duplicate_reads" || h == "duplicate_reads")   dup_reads_col = i
-                  if (h == "_duplicate_bases" || h == "duplicate_bases")   dup_bases_col = i
-                }
-                next
-              }
-            }
-            {
-              nrg++
-              s_total_bases   += ($total_bases_col + 0); s_mapped_bases  += ($mapped_bases_col + 0)
-              s_total_reads   += ($total_reads_col + 0); s_mapped_reads  += ($mapped_reads_col + 0)
-              s_paired += ($paired_col + 0); s_proper += ($proper_col + 0)
-              s_dup_reads += ($dup_reads_col + 0); s_dup_bases += ($dup_bases_col + 0)
-              if ($mismatch_col + 0 > 0 || $mismatch_col == "0") { s_mismatch += ($mismatch_col + 0); n_mismatch++ }
-              if ($avgqual_col + 0 > 0 || $avgqual_col == "0")   { s_avgqual  += ($avgqual_col + 0); n_avgqual++ }
-              if ($ins_mean_col + 0 > 0 || $ins_mean_col == "0") { s_ins_mean += ($ins_mean_col + 0); n_ins_mean++ }
-              if ($ins_sd_col + 0 > 0 || $ins_sd_col == "0")     { s_ins_sd += ($ins_sd_col + 0); n_ins_sd++ }
-              if ($ins_med_col + 0 > 0 || $ins_med_col == "0")   { s_ins_med += ($ins_med_col + 0); n_ins_med++ }
-              if ($ins_mad_col + 0 > 0 || $ins_mad_col == "0")   { s_ins_mad += ($ins_mad_col + 0); n_ins_mad++ }
-            }
-            END {
-              if (nrg == 0) { printf "NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\n"; exit }
-              pct_mapped = (s_total_bases > 0) ? sprintf("%.4f", s_mapped_bases / s_total_bases * 100) : "NA"
-              pct_dup = (s_mapped_bases > 0) ? sprintf("%.4f", s_dup_bases / s_mapped_bases * 100) : "NA"
-              mismatch = (n_mismatch > 0) ? sprintf("%.2f", s_mismatch / n_mismatch) : "NA"
-              avgqual  = (n_avgqual > 0)  ? sprintf("%.2f", s_avgqual / n_avgqual) : "NA"
-              ins_mean = (n_ins_mean > 0) ? sprintf("%.0f", s_ins_mean / n_ins_mean) : "NA"
-              ins_sd   = (n_ins_sd > 0)   ? sprintf("%.2f", s_ins_sd / n_ins_sd) : "NA"
-              ins_med  = (n_ins_med > 0)  ? sprintf("%.0f", s_ins_med / n_ins_med) : "NA"
-              ins_mad  = (n_ins_mad > 0)  ? sprintf("%.0f", s_ins_mad / n_ins_mad) : "NA"
-              printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
-                s_total_bases, s_mapped_bases, s_total_reads, s_mapped_reads, \
-                s_paired, s_proper, mismatch, avgqual, \
-                ins_mean, ins_sd, ins_med, ins_mad, \
-                s_dup_reads, s_dup_bases, pct_mapped, pct_dup
-            }' "${bas_file}")
-
-            NCOLS=$(echo "${result}" | awk -F'\t' '{print NF}')
-            echo "    Output: ${NCOLS} fields"
-            echo "    Values: ${result}"
-
-            # Verify we got 16 non-empty fields
-            NA_COUNT=$(echo "${result}" | tr '\t' '\n' | grep -c '^NA$' || true)
-            if (( NCOLS != 16 )); then
-              echo "::error::parse_bas_file produced ${NCOLS} fields (expected 16) for ${fname}"
-              exit 1
-            fi
-            # With real data, total_bases should not be NA or 0
-            TOTAL_BASES=$(echo "${result}" | cut -f1)
-            if [[ "${TOTAL_BASES}" == "NA" || "${TOTAL_BASES}" == "0" ]]; then
-              echo "::error::parse_bas_file returned TOTAL_BASES=${TOTAL_BASES} for ${fname}"
-              exit 1
-            fi
-            echo "    PASS: 16 fields, TOTAL_BASES=${TOTAL_BASES}"
-          done
-
-          echo ""
-          echo "=== All BAS link and format validations passed ==="
+          echo "=== All QC table integration tests passed ==="
 
   integration-test:
     runs-on: ubuntu-latest
