@@ -19,6 +19,7 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
 | **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera/wget → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
+| **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) from mosdepth output | Parallelized (all cores) |
 | **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
 
 All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:latest`), which bundles:
@@ -62,7 +63,10 @@ sbatch 01_download_and_mosdepth.sh
 # 4. Once all 3,202 tasks finish, submit the NGS-PCA job
 sbatch 02_run_ngspca.sh
 
-# 5. Collect QC metrics for batch-effect overlay
+# 5. Compute coverage summary statistics (parallelized across all cores)
+bash 03a_mosdepth_coverage_summary.sh
+
+# 6. Collect QC metrics for batch-effect overlay
 bash 03_collect_qc.sh
 ```
 
@@ -220,10 +224,17 @@ All output is written to `$WORK_DIR/ngspca_output/`:
 ### Step 3: Collect QC metrics for batch-effect overlay
 
 ```bash
+# First, compute per-sample autosomal coverage summary statistics
+# (parallelized across all available CPU cores)
+bash 03a_mosdepth_coverage_summary.sh
+
+# Then collect all QC metrics into a single table
 bash 03_collect_qc.sh
 ```
 
-This script aggregates four sources of publicly available (or already-computed) QC into a single table — `$WORK_DIR/qc_output/sample_qc.tsv` — that can be directly overlaid on PCA plots to demonstrate which batch effects are captured by each PC.
+The coverage summary script (`03a_mosdepth_coverage_summary.sh`) reads the mosdepth `*.regions.bed.gz` files generated in step 1, extracts autosomal chromosome bins (chr1–22), and computes per-sample statistics: mean, median, standard deviation, MAD (median absolute deviation), and IQR (interquartile range). It auto-detects the mosdepth output directory and parallelizes across all available CPU cores using `xargs -P`.
+
+The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources into a single table — `$WORK_DIR/qc_output/sample_qc.tsv` — that can be directly overlaid on PCA plots to demonstrate which batch effects are captured by each PC.
 
 #### Available QC metrics
 
@@ -237,22 +248,10 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **Median genome coverage** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
 | **% genome ≥ 10× depth** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
 | **% genome ≥ 20× depth** | mosdepth `.mosdepth.global.dist.txt` | Free — already computed in step 1 |
-| **Total bases** (#_total_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Mapped bases** (#_mapped_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Total reads** (#_total_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Mapped reads** (#_mapped_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Mapped reads paired** (#_mapped_reads_paired_in_sequencing) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Mapped reads properly paired** (#_mapped_reads_properly_paired) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **% mismatched bases** (%_of_mismatched_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Avg quality of mapped bases** (average_quality_of_mapped_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Mean insert size** (mean_insert_size) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Insert size SD** (insert_size_sd) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Median insert size** (median_insert_size) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Insert size MAD** (insert_size_median_absolute_deviation) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Duplicate reads** (#_duplicate_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **Duplicate bases** (#_duplicate_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
-| **% mapped reads** (derived) | Computed from BAS fields | mapped_bases / total_bases × 100 |
-| **% duplicate reads** (derived) | Computed from BAS fields | duplicate_bases / mapped_bases × 100 |
+| **Coverage SD** (autosomal bin SD) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
+| **Coverage MAD** (autosomal bin MAD) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
+| **Coverage IQR** (autosomal bin IQR) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
+| **Median bin coverage** (autosomal) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
 | **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
 | **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
@@ -263,18 +262,12 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **Instrument model** | Manifest (sequence.index col 14) | Parsed during setup (e.g. `Illumina NovaSeq 6000`) |
 | **Library name** | Manifest (sequence.index col 15) | Parsed during setup — plate-level batch prefixes |
 
-> **BAS files** (per-readgroup alignment statistics, see [IGSR BAS format](https://www.internationalgenome.org/category/bas/)) are automatically downloaded from the NYGC alignment index files via HTTPS (with FTP fallback) during step 3. The alignment index lists paths for each sample's `.bam.bas` file. If the alignment index or individual BAS files cannot be fetched (e.g. network issues), those columns will be `NA`. You can also pre-populate `$BAS_DIR` with BAS files manually.
-
 #### Output table columns
 
 ```
 SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX  MITO_COV_RATIO
 MEDIAN_GENOME_COV  PCT_GENOME_COV_10X  PCT_GENOME_COV_20X
-TOTAL_BASES  MAPPED_BASES  TOTAL_READS  MAPPED_READS
-MAPPED_READS_PAIRED  MAPPED_READS_PROPERLY_PAIRED
-PCT_MISMATCHED_BASES  AVG_QUALITY_MAPPED_BASES
-MEAN_INSERT_SIZE  INSERT_SIZE_SD  MEDIAN_INSERT_SIZE  INSERT_SIZE_MAD
-DUPLICATE_READS  DUPLICATE_BASES  PCT_MAPPED  PCT_DUPLICATE
+SD_COV  MAD_COV  IQR_COV  MEDIAN_BIN_COV
 POPULATION  SUPERPOPULATION  REPORTED_SEX  RELATEDNESS
 RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 ```
@@ -306,23 +299,17 @@ ggplot(d, aes(PC1, PC2, color = MEAN_AUTOSOMAL_COV)) +
   scale_color_viridis_c() +
   theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by mean coverage")
 
-# Color by duplication rate (library quality batch effect)
-ggplot(d, aes(PC1, PC2, color = PCT_DUPLICATE)) +
+# Color by coverage variability (SD — library/sequencing quality batch effect)
+ggplot(d, aes(PC1, PC2, color = SD_COV)) +
   geom_point(alpha = 0.6, size = 1.2) +
   scale_color_viridis_c() +
-  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by duplication rate")
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by coverage SD")
 
-# Color by average base quality (BAS QC metric)
-ggplot(d, aes(PC1, PC2, color = AVG_QUALITY_MAPPED_BASES)) +
+# Color by coverage IQR (another measure of coverage uniformity)
+ggplot(d, aes(PC1, PC2, color = IQR_COV)) +
   geom_point(alpha = 0.6, size = 1.2) +
   scale_color_viridis_c() +
-  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by avg base quality")
-
-# Color by mean insert size (BAS QC metric)
-ggplot(d, aes(PC1, PC2, color = MEAN_INSERT_SIZE)) +
-  geom_point(alpha = 0.6, size = 1.2) +
-  scale_color_viridis_c() +
-  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by mean insert size")
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by coverage IQR")
 
 # Color by release batch (2504 unrelated vs 698 related)
 ggplot(d, aes(PC1, PC2, color = RELEASE_BATCH)) +
@@ -361,8 +348,6 @@ bash 00_setup.sh
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
 | `ASPERA_BANDWIDTH` | `300m` | Aspera transfer speed limit |
-| `ALIGNMENT_INDEX_URL_2504` | EBI FTP `1000G_2504...alignment.index` | Alignment index for 2,504 samples (lists BAS file URLs) |
-| `ALIGNMENT_INDEX_URL_698` | EBI FTP `1000G_698...alignment.index` | Alignment index for 698 related samples (lists BAS file URLs) |
 
 ---
 
@@ -449,7 +434,6 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | Manifest is empty or has too few samples | Re-download the indexes: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
 | First ~25–30 tasks run, then many download failures | This is often remote/network connection saturation. Keep `%` throttling on array submissions (for example `%10` to `%30`) and/or increase `SAMPLES_PER_TASK` to reduce concurrent Aspera/wget sessions. |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
-| BAS file download failures | Check network access to the EBI FTP. BAS columns will be `NA` for samples where the file could not be fetched. You can manually place BAS files in `$BAS_DIR` as a workaround. |
 
 ---
 
@@ -458,8 +442,6 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 - **1000 Genomes 30x data portal:** https://www.internationalgenome.org/data-portal/data-collection/30x-grch38
 - **IGSR download FAQ:** https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/
 - **NYGC 30x sequence indexes (EBI FTP):** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/
-- **BAS file format:** https://www.internationalgenome.org/category/bas/
-- **NYGC alignment indexes (BAS file URLs):** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index
 - **ENA projects:** [PRJEB31736](https://www.ebi.ac.uk/ena/browser/view/PRJEB31736) (2,504 unrelated), [PRJEB36890](https://www.ebi.ac.uk/ena/browser/view/PRJEB36890) (698 related), [PRJEB55077](https://www.ebi.ac.uk/ena/browser/view/PRJEB55077) (3,202 combined)
 - **GRCh38 reference genome:** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/
 - **Byrska-Bishop et al. (2022):** https://doi.org/10.1016/j.cell.2022.08.004

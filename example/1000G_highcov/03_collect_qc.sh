@@ -3,7 +3,7 @@
 # 03_collect_qc.sh — Aggregate per-sample QC into a single overlay-ready table
 # =============================================================================
 #
-# Collects four sources of publicly available or pipeline-generated QC:
+# Collects publicly available or pipeline-generated QC from multiple sources:
 #
 #   1. mosdepth summary (.mosdepth.summary.txt) — generated during step 01.
 #      Provides per-chromosome mean coverage.  From this we derive:
@@ -17,25 +17,19 @@
 #        - % genome at ≥ 10× depth
 #        - % genome at ≥ 20× depth
 #
-#   2. BAS files (.bam.bas) — per-readgroup alignment statistics from the 1000G
-#      alignment pipeline.  Automatically downloaded from the NYGC alignment
-#      index files on the EBI FTP.  Provides all standard BAS QC metrics
-#      (see https://www.internationalgenome.org/category/bas/):
-#        - Total bases, mapped bases, total reads, mapped reads
-#        - Mapped reads paired in sequencing, mapped reads properly paired
-#        - % mismatched bases, average quality of mapped bases
-#        - Mean/median insert size and variability (SD, MAD)
-#        - Duplicate reads and duplicate bases
-#        - Derived: % mapped reads, % duplicate reads
+#   1c. mosdepth coverage summary (mosdepth_coverage_summary.tsv) — generated
+#       by 03a_mosdepth_coverage_summary.sh.  Per-bin autosomal coverage
+#       distribution statistics:
+#        - Median bin coverage, SD, MAD, IQR
 #
-#   3. IGSR sample panel (integrated_call_samples_v3.*.ALL.ped) — downloaded
+#   2. IGSR sample panel (integrated_call_samples_v3.*.ALL.ped) — downloaded
 #      during setup.  Provides:
 #        - Population (e.g. GBR, YRI, CHB)
 #        - Superpopulation (AFR, AMR, EAS, EUR, SAS)
 #        - Reported sex
 #        - Relatedness (unrelated vs related, from paternal/maternal IDs)
 #
-#   4. Sample manifest (manifest.tsv) — built during setup from the two NYGC
+#   3. Sample manifest (manifest.tsv) — built during setup from the two NYGC
 #      sequence.index files.  Provides batch-level annotations:
 #        - Release batch (2504 vs 698)
 #        - Sequencing center
@@ -68,226 +62,23 @@ else
 fi
 source "${CONFIG_FILE}"
 
-mkdir -p "${QC_OUTPUT}" "${BAS_DIR}"
+mkdir -p "${QC_OUTPUT}"
 
 OUT_TSV="${QC_OUTPUT}/sample_qc.tsv"
 MOSDEPTH_SUMMARY_SUFFIX=".mosdepth.summary.txt"
 MOSDEPTH_GLOBAL_DIST_SUFFIX=".mosdepth.global.dist.txt"
-
-# ── Helper: convert FTP URL to HTTPS ────────────────────────────────────────
-# EBI mirrors all FTP content at https://ftp.1000genomes.ebi.ac.uk/...
-# HTTPS is more reliable (avoids passive-mode FTP issues, firewall blocks, etc.)
-ftp_to_https() {
-  local url="$1"
-  # ftp://ftp.1000genomes.ebi.ac.uk/... → https://ftp.1000genomes.ebi.ac.uk/...
-  echo "${url}" | sed 's|^ftp://|https://|'
-}
-
-# ── Helper: validate alignment index content ────────────────────────────────
-# Checks that a downloaded file is a valid alignment index (TSV with BAS URLs)
-# and NOT an HTML error page (e.g. "404 Not Found" served with HTTP 200).
-validate_alignment_index() {
-  local file="$1"
-  [[ ! -s "${file}" ]] && return 1
-  # Reject files that contain HTML tags (error pages served by web servers)
-  if head -5 "${file}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
-    echo "    REJECTED: file contains HTML (likely an error page, not a TSV index)"
-    return 1
-  fi
-  # A valid alignment index should have tab-separated lines with BAS URLs
-  # (comment lines start with #, data lines have 6 tab-separated fields)
-  local data_lines
-  data_lines=$(grep -cvE '^#|^$' "${file}" 2>/dev/null || echo "0")
-  if [[ "${data_lines}" -eq 0 ]]; then
-    echo "    REJECTED: no data lines found in alignment index"
-    return 1
-  fi
-  # Check that at least one line has a .bas reference in column 5
-  if ! awk -F'\t' '/^[^#]/ && $5 ~ /\.bas/ { found=1; exit } END { exit !found }' "${file}" 2>/dev/null; then
-    echo "    REJECTED: no .bas URLs found in column 5"
-    return 1
-  fi
-  return 0
-}
+COV_SUMMARY_TSV="${QC_OUTPUT}/mosdepth_coverage_summary.tsv"
 
 echo "============================================================"
 echo " Collecting per-sample QC"
 echo "============================================================"
 echo ""
 echo " mosdepth summaries: ${MOSDEPTH_DIR}/*${MOSDEPTH_SUMMARY_SUFFIX}"
-echo " BAS files:          ${BAS_DIR}/*.bam.bas"
+echo " Coverage summary:   ${COV_SUMMARY_TSV}"
 echo " Sample panel:       ${PANEL_FILE}"
 echo " Manifest:           ${MANIFEST}"
 echo " Output:             ${OUT_TSV}"
 echo ""
-
-# ── Download BAS files from alignment index ─────────────────────────────────
-# The NYGC 30x alignment index files list BAS file FTP paths in column 5.
-# Format: CRAM  CRAM_MD5  CRAI  CRAI_MD5  BAS  BAS_MD5
-# We download each BAS file and name it ${SAMPLE_ID}.bam.bas in $BAS_DIR.
-download_bas_files() {
-  echo "Checking for BAS files to download..."
-
-  local alignment_indices=()
-
-  # ── Try each alignment index (2504 and 698) ──
-  for idx_suffix in 2504 698; do
-    local idx_url_var="ALIGNMENT_INDEX_URL_${idx_suffix}"
-    local idx_url="${!idx_url_var}"
-    [[ -z "${idx_url}" ]] && continue
-    local idx_file_var="ALIGNMENT_INDEX_FILE_${idx_suffix}"
-    local idx_file="${!idx_file_var}"
-    [[ -z "${idx_file}" ]] && continue
-
-    # If the file already exists and is valid, use it
-    if [[ -s "${idx_file}" ]] && validate_alignment_index "${idx_file}"; then
-      echo "  Alignment index already present and valid: ${idx_file}"
-      alignment_indices+=("${idx_file}")
-      continue
-    fi
-
-    # If the file exists but is invalid (e.g. HTML error page), remove it
-    if [[ -s "${idx_file}" ]]; then
-      echo "  Existing alignment index is invalid (possibly an HTML error page), re-downloading..."
-      rm -f "${idx_file}"
-    fi
-
-    echo "  Downloading alignment index for ${idx_suffix}-sample set..."
-
-    # Build list of URLs to try: primary, HTTPS variant, then fallback URLs
-    local urls_to_try=()
-    local https_url
-    https_url="$(ftp_to_https "${idx_url}")"
-    urls_to_try+=("${https_url}")
-    [[ "${https_url}" != "${idx_url}" ]] && urls_to_try+=("${idx_url}")
-
-    # Add fallback URLs (e.g. working/ subdirectory, FTP variants)
-    local fallback_var="ALIGNMENT_INDEX_FALLBACK_URLS_${idx_suffix}[@]"
-    if [[ -n "${!fallback_var+x}" ]]; then
-      for fb_url in "${!fallback_var}"; do
-        urls_to_try+=("${fb_url}")
-      done
-    fi
-
-    local downloaded_idx=0
-    for try_url in "${urls_to_try[@]}"; do
-      echo "    Trying: ${try_url}"
-      if curl -sSL --fail --max-time 60 -o "${idx_file}" "${try_url}" 2>/dev/null && validate_alignment_index "${idx_file}"; then
-        echo "    Downloaded and validated: ${idx_file}"
-        downloaded_idx=1
-        break
-      elif wget -q --timeout=60 -O "${idx_file}" "${try_url}" 2>/dev/null && validate_alignment_index "${idx_file}"; then
-        echo "    Downloaded and validated (wget): ${idx_file}"
-        downloaded_idx=1
-        break
-      else
-        rm -f "${idx_file}"
-      fi
-    done
-
-    # Last resort: try bundled alignment index from the repo
-    if [[ "${downloaded_idx}" -eq 0 ]]; then
-      local bundled_dir="${BUNDLED_ALIGNMENT_INDEX_DIR:-${SCRIPT_DIR}/data}"
-      if [[ -d "${bundled_dir}" ]]; then
-        # Look for any alignment index file in the bundled directory
-        for bundled_file in "${bundled_dir}"/*.alignment.index; do
-          if [[ -f "${bundled_file}" ]] && validate_alignment_index "${bundled_file}"; then
-            echo "    Using bundled alignment index: ${bundled_file}"
-            cp "${bundled_file}" "${idx_file}"
-            downloaded_idx=1
-            break
-          fi
-        done
-      fi
-    fi
-
-    if [[ "${downloaded_idx}" -eq 0 ]]; then
-      echo "    WARNING: Could not download or find a valid alignment index for ${idx_suffix}-sample set."
-      echo "    Tried ${#urls_to_try[@]} remote URLs and local fallback."
-      echo "    BAS files for this batch will be skipped."
-      continue
-    fi
-
-    [[ -s "${idx_file}" ]] && alignment_indices+=("${idx_file}")
-  done
-
-  if [[ ${#alignment_indices[@]} -eq 0 ]]; then
-    echo "  No alignment indexes available. BAS columns will be NA."
-    return
-  fi
-
-  # Build a lookup: SAMPLE_ID → BAS_FTP_URL from the alignment index
-  local bas_url_file="${QC_OUTPUT}/.bas_urls.tmp"
-  : > "${bas_url_file}"
-  for idx_file in "${alignment_indices[@]}"; do
-    awk -F'\t' '
-      /^#/ { next }
-      $5 != "" {
-        # Extract sample ID from the BAS filename (column 5)
-        # Typical: ftp:/ftp.../data/POP/SAMPLE/.../SAMPLE.*.bam.bas
-        n = split($5, parts, "/")
-        fname = parts[n]
-        # Strip everything after the first "." to get sample ID
-        split(fname, namep, ".")
-        sample = namep[1]
-        # Fix single-slash ftp:/ to ftp:// (common in IGSR alignment indexes)
-        bas_url = $5
-        sub(/^ftp:\/ftp\./, "ftp://ftp.", bas_url)
-        if (sample != "" && bas_url != "")
-          print sample "\t" bas_url
-      }
-    ' "${idx_file}"
-  done >> "${bas_url_file}"
-
-  local total_bas
-  total_bas=$(wc -l < "${bas_url_file}")
-  echo "  Found ${total_bas} BAS file URLs in alignment index(es)."
-
-  # Download BAS files that are not already present
-  local downloaded=0
-  local skipped=0
-  local failed=0
-  while IFS=$'\t' read -r sample_id bas_url; do
-    local dest="${BAS_DIR}/${sample_id}.bam.bas"
-    if [[ -s "${dest}" ]]; then
-      skipped=$(( skipped + 1 ))
-      continue
-    fi
-    # Try HTTPS version of the BAS URL first, then fall back to original if different
-    local https_bas_url
-    https_bas_url="$(ftp_to_https "${bas_url}")"
-    local urls_to_try=("${https_bas_url}")
-    [[ "${https_bas_url}" != "${bas_url}" ]] && urls_to_try+=("${bas_url}")
-    local dl_ok=0
-    for try_url in "${urls_to_try[@]}"; do
-      if curl -sSL --fail --max-time 60 -o "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
-        # Validate BAS file is not an HTML error page
-        if head -2 "${dest}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
-          rm -f "${dest}"
-          continue
-        fi
-        dl_ok=1; break
-      elif wget -q --timeout=60 -O "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
-        if head -2 "${dest}" | grep -qiE '<html|<h1>|<!DOCTYPE'; then
-          rm -f "${dest}"
-          continue
-        fi
-        dl_ok=1; break
-      fi
-    done
-    if [[ "${dl_ok}" -eq 1 ]]; then
-      downloaded=$(( downloaded + 1 ))
-    else
-      rm -f "${dest}"
-      failed=$(( failed + 1 ))
-    fi
-  done < "${bas_url_file}"
-
-  rm -f "${bas_url_file}"
-  echo "  BAS download complete: ${downloaded} downloaded, ${skipped} already present, ${failed} failed."
-}
-
-download_bas_files
 
 # ── Helper: parse mosdepth summary ──────────────────────────────────────────
 # Summary file columns (tab-separated): chrom length bases mean min max
@@ -349,144 +140,31 @@ parse_mosdepth_global_dist() {
   ' "${dist_file}"
 }
 
-# ── Helper: parse BAS file ───────────────────────────────────────────────────
-# BAS files use a tab-separated format from the 1000G alignment pipeline.
-# See: https://www.internationalgenome.org/category/bas/
-#
-# Standard 21-column format (one row per readgroup):
-#   1: bam_filename           8: #_total_bases           15: average_quality_of_mapped_bases
-#   2: md5                    9: #_mapped_bases           16: mean_insert_size
-#   3: study                 10: #_total_reads            17: insert_size_sd
-#   4: sample                11: #_mapped_reads           18: median_insert_size
-#   5: platform              12: #_mapped_reads_paired_in_sequencing
-#   6: library               13: #_mapped_reads_properly_paired
-#   7: readgroup             14: %_of_mismatched_bases    19: insert_size_median_absolute_deviation
-#                                                         20: #_duplicate_reads
-#                                                         21: #_duplicate_bases
-#
-# When multiple readgroups exist, count columns (8-13, 20-21) are summed.
-# Percentage/average columns (14-15) are recomputed from aggregated counts.
-# Insert size columns (16-19) are averaged across readgroups (weighted).
-#
-# Output: 16 tab-separated fields:
-#   TOTAL_BASES  MAPPED_BASES  TOTAL_READS  MAPPED_READS
-#   MAPPED_READS_PAIRED  MAPPED_READS_PROPERLY_PAIRED
-#   PCT_MISMATCHED_BASES  AVG_QUALITY_MAPPED_BASES
-#   MEAN_INSERT_SIZE  INSERT_SIZE_SD  MEDIAN_INSERT_SIZE  INSERT_SIZE_MAD
-#   DUPLICATE_READS  DUPLICATE_BASES  PCT_MAPPED  PCT_DUPLICATE
-parse_bas_file() {
-  local bas_file="$1"
-  awk 'BEGIN { FS="\t"; OFS="\t"
-    # Positional defaults (standard 21-column BAS format)
-    total_bases_col=8; mapped_bases_col=9; total_reads_col=10; mapped_reads_col=11
-    paired_col=12; proper_col=13; mismatch_col=14; avgqual_col=15
-    ins_mean_col=16; ins_sd_col=17; ins_med_col=18; ins_mad_col=19
-    dup_reads_col=20; dup_bases_col=21
-    has_header=0
-  }
-  NR == 1 {
-    # Detect header row: if first field contains letters and is not a file path
-    if ($1 ~ /[a-zA-Z]/ && $1 !~ /\.bam$/ && $1 !~ /\.cram$/ && $1 !~ /^[\/.]/) {
-      has_header = 1
-      # Find column indices by header name (case-insensitive)
-      for (i = 1; i <= NF; i++) {
-        h = tolower($i)
-        gsub(/^#/, "", h)  # strip leading #
-        if (h == "_total_bases" || h == "total_bases")           total_bases_col = i
-        if (h == "_mapped_bases" || h == "mapped_bases")         mapped_bases_col = i
-        if (h == "_total_reads" || h == "total_reads")           total_reads_col = i
-        if (h == "_mapped_reads" || h == "mapped_reads")         mapped_reads_col = i
-        if (h == "_mapped_reads_paired_in_sequencing" || h == "mapped_reads_paired_in_sequencing")   paired_col = i
-        if (h == "_mapped_reads_properly_paired" || h == "mapped_reads_properly_paired")             proper_col = i
-        if (h == "%_of_mismatched_bases" || h == "of_mismatched_bases" || h == "mismatched_bases")   mismatch_col = i
-        if (h == "average_quality_of_mapped_bases" || h == "avg_quality_mapped_bases")               avgqual_col = i
-        if (h == "mean_insert_size")                             ins_mean_col = i
-        if (h == "insert_size_sd")                               ins_sd_col = i
-        if (h == "median_insert_size")                           ins_med_col = i
-        if (h == "insert_size_median_absolute_deviation" || h == "insert_size_mad") ins_mad_col = i
-        if (h == "_duplicate_reads" || h == "duplicate_reads")   dup_reads_col = i
-        if (h == "_duplicate_bases" || h == "duplicate_bases")   dup_bases_col = i
-      }
-      next
-    }
-  }
-  {
-    nrg++
-    # Sum count columns across readgroups
-    s_total_bases   += ($total_bases_col   + 0)
-    s_mapped_bases  += ($mapped_bases_col  + 0)
-    s_total_reads   += ($total_reads_col   + 0)
-    s_mapped_reads  += ($mapped_reads_col  + 0)
-    s_paired        += ($paired_col        + 0)
-    s_proper        += ($proper_col        + 0)
-    s_dup_reads     += ($dup_reads_col     + 0)
-    s_dup_bases     += ($dup_bases_col     + 0)
-    # For mismatch %, average quality, and insert size stats: accumulate for averaging
-    if ($mismatch_col + 0 > 0 || $mismatch_col == "0")  { s_mismatch += ($mismatch_col + 0); n_mismatch++ }
-    if ($avgqual_col + 0 > 0 || $avgqual_col == "0")    { s_avgqual  += ($avgqual_col  + 0); n_avgqual++  }
-    if ($ins_mean_col + 0 > 0 || $ins_mean_col == "0")  { s_ins_mean += ($ins_mean_col + 0); n_ins_mean++ }
-    if ($ins_sd_col + 0 > 0 || $ins_sd_col == "0")      { s_ins_sd   += ($ins_sd_col   + 0); n_ins_sd++   }
-    if ($ins_med_col + 0 > 0 || $ins_med_col == "0")    { s_ins_med  += ($ins_med_col  + 0); n_ins_med++  }
-    if ($ins_mad_col + 0 > 0 || $ins_mad_col == "0")    { s_ins_mad  += ($ins_mad_col  + 0); n_ins_mad++  }
-  }
-  END {
-    if (nrg == 0) {
-      # No data rows — output all NAs (16 fields)
-      printf "NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\n"
-      exit
-    }
-    # Derived percentages
-    pct_mapped = "NA"
-    if (s_total_bases > 0 && s_mapped_bases >= 0) {
-      pct_mapped = sprintf("%.4f", s_mapped_bases / s_total_bases * 100)
-    }
-    pct_dup = "NA"
-    if (s_mapped_bases > 0 && s_dup_bases >= 0) {
-      pct_dup = sprintf("%.4f", s_dup_bases / s_mapped_bases * 100)
-    }
-    # Averaged metrics
-    mismatch  = (n_mismatch > 0) ? sprintf("%.2f", s_mismatch / n_mismatch) : "NA"
-    avgqual   = (n_avgqual  > 0) ? sprintf("%.2f", s_avgqual  / n_avgqual)  : "NA"
-    ins_mean  = (n_ins_mean > 0) ? sprintf("%.0f", s_ins_mean / n_ins_mean) : "NA"
-    ins_sd    = (n_ins_sd   > 0) ? sprintf("%.2f", s_ins_sd   / n_ins_sd)   : "NA"
-    ins_med   = (n_ins_med  > 0) ? sprintf("%.0f", s_ins_med  / n_ins_med) : "NA"
-    ins_mad   = (n_ins_mad  > 0) ? sprintf("%.0f", s_ins_mad  / n_ins_mad) : "NA"
-
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
-      s_total_bases, s_mapped_bases, s_total_reads, s_mapped_reads, \
-      s_paired, s_proper, \
-      mismatch, avgqual, \
-      ins_mean, ins_sd, ins_med, ins_mad, \
-      s_dup_reads, s_dup_bases, \
-      pct_mapped, pct_dup
-  }
-  ' "${bas_file}"
-}
-
 # ── Build QC table ───────────────────────────────────────────────────────────
 echo "Building QC table..."
 
-# BAS-derived columns (16 fields from parse_bas_file):
-#   TOTAL_BASES  MAPPED_BASES  TOTAL_READS  MAPPED_READS
-#   MAPPED_READS_PAIRED  MAPPED_READS_PROPERLY_PAIRED
-#   PCT_MISMATCHED_BASES  AVG_QUALITY_MAPPED_BASES
-#   MEAN_INSERT_SIZE  INSERT_SIZE_SD  MEDIAN_INSERT_SIZE  INSERT_SIZE_MAD
-#   DUPLICATE_READS  DUPLICATE_BASES  PCT_MAPPED  PCT_DUPLICATE
-BAS_NA="NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA"
 DIST_NA="NA\tNA\tNA"
+COV_SUMMARY_NA="NA\tNA\tNA\tNA"
 
 HEADER="SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX\tMITO_COV_RATIO"
 HEADER="${HEADER}\tMEDIAN_GENOME_COV\tPCT_GENOME_COV_10X\tPCT_GENOME_COV_20X"
-HEADER="${HEADER}\tTOTAL_BASES\tMAPPED_BASES\tTOTAL_READS\tMAPPED_READS"
-HEADER="${HEADER}\tMAPPED_READS_PAIRED\tMAPPED_READS_PROPERLY_PAIRED"
-HEADER="${HEADER}\tPCT_MISMATCHED_BASES\tAVG_QUALITY_MAPPED_BASES"
-HEADER="${HEADER}\tMEAN_INSERT_SIZE\tINSERT_SIZE_SD\tMEDIAN_INSERT_SIZE\tINSERT_SIZE_MAD"
-HEADER="${HEADER}\tDUPLICATE_READS\tDUPLICATE_BASES\tPCT_MAPPED\tPCT_DUPLICATE"
+HEADER="${HEADER}\tSD_COV\tMAD_COV\tIQR_COV\tMEDIAN_BIN_COV"
 echo -e "${HEADER}" > "${OUT_TSV}"
+
+# Load coverage summary into an associative-style lookup (awk join later)
+# Format: SAMPLE_ID  MEAN_COV  MEDIAN_COV  SD_COV  MAD_COV  IQR_COV
+if [[ -f "${COV_SUMMARY_TSV}" ]]; then
+  echo "  Loading coverage summary from: ${COV_SUMMARY_TSV}"
+  COV_SUMMARY_LOADED=1
+else
+  echo "  WARNING: Coverage summary not found at ${COV_SUMMARY_TSV}."
+  echo "  Run 03a_mosdepth_coverage_summary.sh first for SD/MAD/IQR metrics."
+  echo "  Those columns will be NA."
+  COV_SUMMARY_LOADED=0
+fi
 
 # Iterate over mosdepth summary files (one per sample)
 FOUND=0
-MISSING_BAS=0
 for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
   [[ -f "${summary}" ]] || continue
 
@@ -506,20 +184,24 @@ for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
     dist_fields="${DIST_NA}"
   fi
 
-  # Parse BAS file if available
-  bas_file="${BAS_DIR}/${sample_id}.bam.bas"
-  if [[ -f "${bas_file}" ]]; then
-    bas_fields=$(parse_bas_file "${bas_file}")
+  # Look up coverage summary stats (SD, MAD, IQR, MEDIAN_BIN_COV)
+  if [[ "${COV_SUMMARY_LOADED}" -eq 1 ]]; then
+    cov_fields=$(awk -F'\t' -v sid="${sample_id}" '
+      NR > 1 && $1 == sid {
+        printf "%s\t%s\t%s\t%s\n", $4, $5, $6, $2
+        found = 1; exit
+      }
+      END { if (!found) printf "NA\tNA\tNA\tNA\n" }
+    ' "${COV_SUMMARY_TSV}")
   else
-    bas_fields="${BAS_NA}"
-    MISSING_BAS=$(( MISSING_BAS + 1 ))
+    cov_fields="${COV_SUMMARY_NA}"
   fi
 
-  echo -e "${sample_id}\t${mos_fields}\t${dist_fields}\t${bas_fields}" >> "${OUT_TSV}"
+  echo -e "${sample_id}\t${mos_fields}\t${dist_fields}\t${cov_fields}" >> "${OUT_TSV}"
   FOUND=$(( FOUND + 1 ))
 done
 
-echo "  Processed ${FOUND} samples (${MISSING_BAS} missing BAS files)."
+echo "  Processed ${FOUND} samples."
 
 # ── Join with IGSR sample panel ──────────────────────────────────────────────
 # The PED file columns: family_id sample_id paternal maternal sex phenotype pop superpop
