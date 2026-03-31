@@ -63,6 +63,63 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate HTML error page rejection (content validation)
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          TEST_WORK="${RUNNER_TEMP}/bas_link_test"
+          mkdir -p "${TEST_WORK}/bas_files" "${TEST_WORK}/qc_output"
+
+          # Source validate_alignment_index from the script
+          source <(sed -n '/^validate_alignment_index()/,/^}/p' 03_collect_qc.sh)
+
+          # ── Test 1: Reject HTML 404 error pages ──
+          echo "=== Test: HTML error page rejection ==="
+          cat > "${TEST_WORK}/fake_404.index" <<'EOF'
+          <h1>Not Found</h1>
+          <p>The requested URL was not found on this server.</p>
+          EOF
+          if validate_alignment_index "${TEST_WORK}/fake_404.index" 2>/dev/null; then
+            echo "::error::validate_alignment_index accepted an HTML error page!"
+            exit 1
+          fi
+          echo "PASS: HTML 404 error page correctly rejected"
+
+          # ── Test 2: Reject full HTML documents ──
+          cat > "${TEST_WORK}/fake_html.index" <<'EOF'
+          <!DOCTYPE html>
+          <html><body><h1>404 Not Found</h1></body></html>
+          EOF
+          if validate_alignment_index "${TEST_WORK}/fake_html.index" 2>/dev/null; then
+            echo "::error::validate_alignment_index accepted a full HTML document!"
+            exit 1
+          fi
+          echo "PASS: Full HTML document correctly rejected"
+
+          # ── Test 3: Reject empty files ──
+          touch "${TEST_WORK}/empty.index"
+          if validate_alignment_index "${TEST_WORK}/empty.index" 2>/dev/null; then
+            echo "::error::validate_alignment_index accepted an empty file!"
+            exit 1
+          fi
+          echo "PASS: Empty file correctly rejected"
+
+          # ── Test 4: Accept bundled alignment index ──
+          BUNDLED="data/1000genomes.high_coverage.GRCh38DH.alignment.index"
+          if [[ -f "${BUNDLED}" ]]; then
+            if validate_alignment_index "${BUNDLED}"; then
+              echo "PASS: Bundled alignment index accepted"
+            else
+              echo "::error::validate_alignment_index rejected the bundled alignment index!"
+              exit 1
+            fi
+          else
+            echo "SKIP: No bundled alignment index found at ${BUNDLED}"
+          fi
+
+          echo ""
+          echo "=== All content validation tests passed ==="
+
       - name: Download alignment index and validate BAS URLs
         working-directory: example/1000G_highcov
         run: |
@@ -70,41 +127,78 @@ jobs:
           TEST_WORK="${RUNNER_TEMP}/bas_link_test"
           mkdir -p "${TEST_WORK}/bas_files"
 
-          # ── 0. Verify HTTPS alignment index URLs are accessible ──
-          # These are the production URLs used by 03_collect_qc.sh (config.sh defaults).
-          echo "=== Verifying HTTPS alignment index accessibility ==="
-          for idx_url in \
-            "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index" \
-            "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"; do
-            echo -n "  Testing: ${idx_url} ... "
-            if curl -sSL --max-time 30 --head "${idx_url}" 2>/dev/null | grep -q "200"; then
-              echo "accessible (HTTP 200)"
-            elif curl -sSL --max-time 30 --range 0-0 -o /dev/null "${idx_url}" 2>/dev/null; then
-              echo "accessible (range request)"
-            elif wget --spider --timeout=30 "${idx_url}" 2>/dev/null; then
-              echo "accessible (wget spider)"
-            else
-              echo "WARNING: could not verify (may be a transient issue)"
-            fi
+          # Source validate_alignment_index from the script
+          source <(sed -n '/^validate_alignment_index()/,/^}/p' 03_collect_qc.sh)
+
+          # ── 0. Try downloading NYGC alignment indexes (all 3,202 samples) ──
+          # Try multiple URL patterns — the EBI FTP has historically moved these files.
+          echo "=== Attempting to download NYGC 30x alignment indexes ==="
+          NYGC_FOUND=0
+          for idx_name in \
+            "1000G_2504_high_coverage.GRCh38DH.alignment.index" \
+            "1000G_698_related_high_coverage.GRCh38DH.alignment.index"; do
+            echo "  Looking for: ${idx_name}"
+            dest="${TEST_WORK}/${idx_name}"
+            for url_pattern in \
+              "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/${idx_name}" \
+              "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/${idx_name}" \
+              "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/${idx_name}" \
+              "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/${idx_name}" \
+              "https://s3.amazonaws.com/1000genomes/1000G_2504_high_coverage/${idx_name}"; do
+              echo -n "    Trying: ${url_pattern} ... "
+              if curl -sSL --fail --max-time 30 -o "${dest}" "${url_pattern}" 2>/dev/null && validate_alignment_index "${dest}"; then
+                lines=$(grep -cvE '^#|^$' "${dest}" 2>/dev/null || echo "0")
+                echo "FOUND (${lines} entries)"
+                NYGC_FOUND=$(( NYGC_FOUND + 1 ))
+                break
+              else
+                rm -f "${dest}"
+                echo "not available"
+              fi
+            done
           done
           echo ""
+          if (( NYGC_FOUND > 0 )); then
+            echo "INFO: Found ${NYGC_FOUND} NYGC alignment index file(s)"
+          else
+            echo "INFO: NYGC alignment indexes not found at any URL (they may have been removed from the FTP)."
+            echo "      The pipeline will fall back to bundled alignment indexes."
+          fi
+          echo ""
 
-          # ── 1. Download the GRCh38 high-coverage pilot alignment index (24 samples) ──
-          # This is on GitHub (always accessible) and has known BAS file URLs.
-          echo "=== Downloading pilot alignment index from IGSR GitHub ==="
-          curl -sSL -o "${TEST_WORK}/pilot.alignment.index" \
-            "https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
+          # ── 1. Use bundled or downloaded alignment index for BAS URL testing ──
+          # Prefer NYGC if available; fall back to bundled pilot (24 samples)
+          echo "=== Selecting alignment index for BAS URL testing ==="
+          ALIGNMENT_INDEX=""
+          for candidate in \
+            "${TEST_WORK}/1000G_2504_high_coverage.GRCh38DH.alignment.index" \
+            "data/1000genomes.high_coverage.GRCh38DH.alignment.index"; do
+            if [[ -f "${candidate}" ]] && validate_alignment_index "${candidate}"; then
+              ALIGNMENT_INDEX="${candidate}"
+              break
+            fi
+          done
 
-          PILOT_LINES=$(grep -cv '^#' "${TEST_WORK}/pilot.alignment.index" || true)
-          echo "Pilot alignment index: ${PILOT_LINES} entries"
-          if (( PILOT_LINES < 20 )); then
-            echo "::error::Pilot alignment index has too few entries (${PILOT_LINES}, expected ~24)"
+          # Last resort: download pilot from IGSR GitHub
+          if [[ -z "${ALIGNMENT_INDEX}" ]]; then
+            echo "Downloading pilot alignment index from IGSR GitHub..."
+            curl -sSL -o "${TEST_WORK}/pilot.alignment.index" \
+              "https://raw.githubusercontent.com/igsr/1000Genomes_data_indexes/master/data_collections/1000_genomes_project/1000genomes.high_coverage.GRCh38DH.alignment.index"
+            if validate_alignment_index "${TEST_WORK}/pilot.alignment.index"; then
+              ALIGNMENT_INDEX="${TEST_WORK}/pilot.alignment.index"
+            fi
+          fi
+
+          if [[ -z "${ALIGNMENT_INDEX}" ]]; then
+            echo "::error::No valid alignment index available for testing"
             exit 1
           fi
-          echo "PASS: Pilot alignment index has ${PILOT_LINES} entries"
+
+          PILOT_LINES=$(grep -cvE '^#|^$' "${ALIGNMENT_INDEX}" || true)
+          echo "Using alignment index: ${ALIGNMENT_INDEX} (${PILOT_LINES} entries)"
+          echo ""
 
           # ── 2. Extract BAS URLs from alignment index (column 5) ──
-          echo ""
           echo "=== Extracting BAS URLs from alignment index ==="
           awk -F'\t' '
             /^#/ { next }
@@ -117,7 +211,7 @@ jobs:
               sample = namep[1]
               print sample "\t" bas_url
             }
-          ' "${TEST_WORK}/pilot.alignment.index" > "${TEST_WORK}/bas_urls.tsv"
+          ' "${ALIGNMENT_INDEX}" > "${TEST_WORK}/bas_urls.tsv"
 
           TOTAL_URLS=$(wc -l < "${TEST_WORK}/bas_urls.tsv")
           echo "Extracted ${TOTAL_URLS} BAS URLs"
