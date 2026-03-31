@@ -186,18 +186,20 @@ download_bas_files() {
       skipped=$(( skipped + 1 ))
       continue
     fi
-    # Try HTTPS version of the BAS URL first, then original
+    # Try HTTPS version of the BAS URL first, then fall back to original if different
     local https_bas_url
     https_bas_url="$(ftp_to_https "${bas_url}")"
-    if curl -sSL --max-time 60 -o "${dest}" "${https_bas_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
-      downloaded=$(( downloaded + 1 ))
-    elif wget -q --timeout=60 -O "${dest}" "${https_bas_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
-      downloaded=$(( downloaded + 1 ))
-    elif [[ "${https_bas_url}" != "${bas_url}" ]] && \
-         { curl -sSL --max-time 60 -o "${dest}" "${bas_url}" 2>/dev/null && [[ -s "${dest}" ]]; }; then
-      downloaded=$(( downloaded + 1 ))
-    elif [[ "${https_bas_url}" != "${bas_url}" ]] && \
-         { wget -q --timeout=60 -O "${dest}" "${bas_url}" 2>/dev/null && [[ -s "${dest}" ]]; }; then
+    local urls_to_try=("${https_bas_url}")
+    [[ "${https_bas_url}" != "${bas_url}" ]] && urls_to_try+=("${bas_url}")
+    local dl_ok=0
+    for try_url in "${urls_to_try[@]}"; do
+      if curl -sSL --max-time 60 -o "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        dl_ok=1; break
+      elif wget -q --timeout=60 -O "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        dl_ok=1; break
+      fi
+    done
+    if [[ "${dl_ok}" -eq 1 ]]; then
       downloaded=$(( downloaded + 1 ))
     else
       rm -f "${dest}"
@@ -256,19 +258,16 @@ parse_mosdepth_summary() {
 # Output: 3 tab-separated fields
 parse_mosdepth_global_dist() {
   local dist_file="$1"
-  awk 'BEGIN { FS="\t"; median="NA"; pct10x="NA"; pct20x="NA"; found_median=0 }
+  awk 'BEGIN { FS="\t"; median="NA"; pct10x="NA"; pct20x="NA"; last_depth_above_half=-1 }
     $1 == "total" {
       depth = $2 + 0
       frac  = $3 + 0
       if (depth == 10) pct10x = sprintf("%.4f", frac * 100)
       if (depth == 20) pct20x = sprintf("%.4f", frac * 100)
-      if (!found_median && frac < 0.5) {
-        # The previous depth was >= 0.5; this one dropped below.
-        median = (depth > 0) ? depth - 1 : 0
-        found_median = 1
-      }
+      if (frac >= 0.5) last_depth_above_half = depth
     }
     END {
+      if (last_depth_above_half >= 0) median = last_depth_above_half
       printf "%s\t%s\t%s\n", median, pct10x, pct20x
     }
   ' "${dist_file}"
