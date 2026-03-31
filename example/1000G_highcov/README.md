@@ -233,9 +233,22 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **X coverage ratio** (X/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Y coverage ratio** (Y/autosomal) | mosdepth `.mosdepth.summary.txt` | Free — already computed in step 1 |
 | **Inferred sex** (M/F from coverage) | Derived from X/Y ratios | Free — derived automatically |
-| **% mapped reads** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
-| **Duplication rate** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
-| **Total sequenced bases** | EBI `.bam.bas` file | Optional — place BAS files in `$BAS_DIR` if available |
+| **Total bases** (#_total_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Mapped bases** (#_mapped_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Total reads** (#_total_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Mapped reads** (#_mapped_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Mapped reads paired** (#_mapped_reads_paired_in_sequencing) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Mapped reads properly paired** (#_mapped_reads_properly_paired) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **% mismatched bases** (%_of_mismatched_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Avg quality of mapped bases** (average_quality_of_mapped_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Mean insert size** (mean_insert_size) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Insert size SD** (insert_size_sd) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Median insert size** (median_insert_size) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Insert size MAD** (insert_size_median_absolute_deviation) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Duplicate reads** (#_duplicate_reads) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **Duplicate bases** (#_duplicate_bases) | EBI `.bam.bas` file | Auto-downloaded from alignment index |
+| **% mapped reads** (derived) | Computed from BAS fields | mapped_bases / total_bases × 100 |
+| **% duplicate reads** (derived) | Computed from BAS fields | duplicate_bases / mapped_bases × 100 |
 | **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
 | **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
@@ -246,14 +259,19 @@ This script aggregates four sources of publicly available (or already-computed) 
 | **Instrument model** | Manifest (sequence.index col 14) | Parsed during setup (e.g. `Illumina NovaSeq 6000`) |
 | **Library name** | Manifest (sequence.index col 15) | Parsed during setup — plate-level batch prefixes |
 
-> **Note:** The `.bam.bas` files (Picard-equivalent QC statistics) are not automatically downloaded by this pipeline. If you have them from the original NYGC alignment pipeline (Byrska-Bishop et al. 2022), place them in `$WORK_DIR/bas_files/` and `03_collect_qc.sh` will pick them up. Otherwise, the BAS-derived columns (% mapped, duplication rate, total bases) will be `NA`.
+> **BAS files** (per-readgroup alignment statistics, see [IGSR BAS format](https://www.internationalgenome.org/category/bas/)) are automatically downloaded from the NYGC alignment index files on the EBI FTP during step 3. The alignment index lists FTP paths for each sample's `.bam.bas` file. If the alignment index or individual BAS files cannot be fetched (e.g. network issues), those columns will be `NA`. You can also pre-populate `$BAS_DIR` with BAS files manually.
 
 #### Output table columns
 
 ```
 SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX
-PCT_MAPPED  PCT_DUPLICATE  TOTAL_BASES  POPULATION  SUPERPOPULATION  REPORTED_SEX
-RELATEDNESS  RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
+TOTAL_BASES  MAPPED_BASES  TOTAL_READS  MAPPED_READS
+MAPPED_READS_PAIRED  MAPPED_READS_PROPERLY_PAIRED
+PCT_MISMATCHED_BASES  AVG_QUALITY_MAPPED_BASES
+MEAN_INSERT_SIZE  INSERT_SIZE_SD  MEDIAN_INSERT_SIZE  INSERT_SIZE_MAD
+DUPLICATE_READS  DUPLICATE_BASES  PCT_MAPPED  PCT_DUPLICATE
+POPULATION  SUPERPOPULATION  REPORTED_SEX  RELATEDNESS
+RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 ```
 
 #### Joining QC with PCA results
@@ -288,6 +306,18 @@ ggplot(d, aes(PC1, PC2, color = PCT_DUPLICATE)) +
   geom_point(alpha = 0.6, size = 1.2) +
   scale_color_viridis_c() +
   theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by duplication rate")
+
+# Color by average base quality (BAS QC metric)
+ggplot(d, aes(PC1, PC2, color = AVG_QUALITY_MAPPED_BASES)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  scale_color_viridis_c() +
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by avg base quality")
+
+# Color by mean insert size (BAS QC metric)
+ggplot(d, aes(PC1, PC2, color = MEAN_INSERT_SIZE)) +
+  geom_point(alpha = 0.6, size = 1.2) +
+  scale_color_viridis_c() +
+  theme_bw() + labs(title = "1000G 30x — PC1 vs PC2 by mean insert size")
 
 # Color by release batch (2504 unrelated vs 698 related)
 ggplot(d, aes(PC1, PC2, color = RELEASE_BATCH)) +
@@ -326,6 +356,8 @@ bash 00_setup.sh
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
 | `ASPERA_BANDWIDTH` | `300m` | Aspera transfer speed limit |
+| `ALIGNMENT_INDEX_URL_2504` | EBI FTP `1000G_2504...alignment.index` | Alignment index for 2,504 samples (lists BAS file URLs) |
+| `ALIGNMENT_INDEX_URL_698` | EBI FTP `1000G_698...alignment.index` | Alignment index for 698 related samples (lists BAS file URLs) |
 
 ---
 
@@ -412,6 +444,7 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | Manifest is empty or has too few samples | Re-download the indexes: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
 | First ~25–30 tasks run, then many download failures | This is often remote/network connection saturation. Keep `%` throttling on array submissions (for example `%10` to `%30`) and/or increase `SAMPLES_PER_TASK` to reduce concurrent Aspera/wget sessions. |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
+| BAS file download failures | Check network access to the EBI FTP. BAS columns will be `NA` for samples where the file could not be fetched. You can manually place BAS files in `$BAS_DIR` as a workaround. |
 
 ---
 
@@ -420,6 +453,8 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 - **1000 Genomes 30x data portal:** https://www.internationalgenome.org/data-portal/data-collection/30x-grch38
 - **IGSR download FAQ:** https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/
 - **NYGC 30x sequence indexes (EBI FTP):** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/
+- **BAS file format:** https://www.internationalgenome.org/category/bas/
+- **NYGC alignment indexes (BAS file URLs):** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index
 - **ENA projects:** [PRJEB31736](https://www.ebi.ac.uk/ena/browser/view/PRJEB31736) (2,504 unrelated), [PRJEB36890](https://www.ebi.ac.uk/ena/browser/view/PRJEB36890) (698 related), [PRJEB55077](https://www.ebi.ac.uk/ena/browser/view/PRJEB55077) (3,202 combined)
 - **GRCh38 reference genome:** ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/
 - **Byrska-Bishop et al. (2022):** https://doi.org/10.1016/j.cell.2022.08.004
