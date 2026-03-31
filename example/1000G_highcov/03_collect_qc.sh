@@ -9,6 +9,13 @@
 #      Provides per-chromosome mean coverage.  From this we derive:
 #        - Mean autosomal coverage (chr1–22)
 #        - X and Y coverage ratios → inferred genetic sex
+#        - Mitochondrial (chrM) coverage ratio — useful for sample QC
+#
+#   1b. mosdepth global distribution (.mosdepth.global.dist.txt) — generated
+#       during step 01.  Cumulative coverage depth distribution.  From this:
+#        - Median genome coverage
+#        - % genome at ≥ 10× depth
+#        - % genome at ≥ 20× depth
 #
 #   2. BAS files (.bam.bas) — per-readgroup alignment statistics from the 1000G
 #      alignment pipeline.  Automatically downloaded from the NYGC alignment
@@ -65,6 +72,16 @@ mkdir -p "${QC_OUTPUT}" "${BAS_DIR}"
 
 OUT_TSV="${QC_OUTPUT}/sample_qc.tsv"
 MOSDEPTH_SUMMARY_SUFFIX=".mosdepth.summary.txt"
+MOSDEPTH_GLOBAL_DIST_SUFFIX=".mosdepth.global.dist.txt"
+
+# ── Helper: convert FTP URL to HTTPS ────────────────────────────────────────
+# EBI mirrors all FTP content at https://ftp.1000genomes.ebi.ac.uk/...
+# HTTPS is more reliable (avoids passive-mode FTP issues, firewall blocks, etc.)
+ftp_to_https() {
+  local url="$1"
+  # ftp://ftp.1000genomes.ebi.ac.uk/... → https://ftp.1000genomes.ebi.ac.uk/...
+  echo "${url}" | sed 's|^ftp://|https://|'
+}
 
 echo "============================================================"
 echo " Collecting per-sample QC"
@@ -94,10 +111,29 @@ download_bas_files() {
 
     if [[ ! -s "${idx_file}" ]]; then
       echo "  Downloading alignment index: ${idx_url}"
-      if curl -sSL -o "${idx_file}" "${idx_url}" 2>/dev/null || \
-         wget -q -O "${idx_file}" "${idx_url}" 2>/dev/null; then
-        echo "    Downloaded: ${idx_file}"
-      else
+      # Try HTTPS first (more reliable), then fall back to original URL
+      local https_url
+      https_url="$(ftp_to_https "${idx_url}")"
+      local downloaded_idx=0
+      if curl -sSL --max-time 60 -o "${idx_file}" "${https_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
+        echo "    Downloaded (HTTPS): ${idx_file}"
+        downloaded_idx=1
+      elif wget -q --timeout=60 -O "${idx_file}" "${https_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
+        echo "    Downloaded (wget HTTPS): ${idx_file}"
+        downloaded_idx=1
+      fi
+      # If HTTPS didn't work and the original URL differs, try the original
+      if [[ "${downloaded_idx}" -eq 0 && "${https_url}" != "${idx_url}" ]]; then
+        if curl -sSL --max-time 60 -o "${idx_file}" "${idx_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
+          echo "    Downloaded (original URL): ${idx_file}"
+          downloaded_idx=1
+        elif wget -q --timeout=60 -O "${idx_file}" "${idx_url}" 2>/dev/null && [[ -s "${idx_file}" ]]; then
+          echo "    Downloaded (wget original): ${idx_file}"
+          downloaded_idx=1
+        fi
+      fi
+      if [[ "${downloaded_idx}" -eq 0 ]]; then
+        rm -f "${idx_file}"
         echo "    WARNING: Could not download alignment index from ${idx_url}"
         echo "    BAS files for this batch will be skipped."
         continue
@@ -150,14 +186,21 @@ download_bas_files() {
       skipped=$(( skipped + 1 ))
       continue
     fi
-    if wget -q -O "${dest}" "${bas_url}" 2>/dev/null || \
-       curl -sSL -o "${dest}" "${bas_url}" 2>/dev/null; then
-      if [[ -s "${dest}" ]]; then
-        downloaded=$(( downloaded + 1 ))
-      else
-        rm -f "${dest}"
-        failed=$(( failed + 1 ))
+    # Try HTTPS version of the BAS URL first, then fall back to original if different
+    local https_bas_url
+    https_bas_url="$(ftp_to_https "${bas_url}")"
+    local urls_to_try=("${https_bas_url}")
+    [[ "${https_bas_url}" != "${bas_url}" ]] && urls_to_try+=("${bas_url}")
+    local dl_ok=0
+    for try_url in "${urls_to_try[@]}"; do
+      if curl -sSL --max-time 60 -o "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        dl_ok=1; break
+      elif wget -q --timeout=60 -O "${dest}" "${try_url}" 2>/dev/null && [[ -s "${dest}" ]]; then
+        dl_ok=1; break
       fi
+    done
+    if [[ "${dl_ok}" -eq 1 ]]; then
+      downloaded=$(( downloaded + 1 ))
     else
       rm -f "${dest}"
       failed=$(( failed + 1 ))
@@ -180,21 +223,54 @@ parse_mosdepth_summary() {
     $1 ~ /^chr[0-9]+$/ {       # autosomal chromosomes (chr1–chr22)
       sum += $4 * $2; len += $2
     }
-    $1 == "chrX" { x_mean = $4 }
-    $1 == "chrY" { y_mean = $4 }
+    $1 == "chrX"  { x_mean = $4 }
+    $1 == "chrY"  { y_mean = $4 }
+    $1 == "chrM"  { m_mean = $4 }
     END {
       auto_cov = (len > 0) ? sum / len : "NA"
       x_ratio  = (auto_cov > 0 && x_mean != "") ? x_mean / auto_cov : "NA"
       y_ratio  = (auto_cov > 0 && y_mean != "") ? y_mean / auto_cov : "NA"
+      m_ratio  = (auto_cov > 0 && m_mean != "") ? m_mean / auto_cov : "NA"
       # Infer sex: males have X~0.5× autosome and detectable Y; females X~1.0×
       if (x_ratio != "NA" && y_ratio != "NA") {
         inferred_sex = (y_ratio > 0.1 && x_ratio < 0.75) ? "M" : "F"
       } else {
         inferred_sex = "NA"
       }
-      printf "%.4f\t%.4f\t%.4f\t%s\n", auto_cov, x_ratio, y_ratio, inferred_sex
+      printf "%.4f\t%.4f\t%.4f\t%s\t%s\n", auto_cov, x_ratio, y_ratio, inferred_sex, \
+        (m_ratio != "NA") ? sprintf("%.4f", m_ratio) : "NA"
     }
   ' "${summary_file}"
+}
+
+# ── Helper: parse mosdepth global coverage distribution ─────────────────────
+# The mosdepth .global.dist.txt file records the cumulative coverage
+# distribution for the whole genome.  Format (tab-separated):
+#   chrom/total   depth   fraction_at_>=_depth
+# Example:
+#   total   0   1.00
+#   total   1   0.99
+#   ...
+# From this we derive:
+#   - MEDIAN_GENOME_COV: depth at which cumulative fraction crosses 0.50
+#   - PCT_GENOME_COV_10X: fraction of genome at >= 10× depth
+#   - PCT_GENOME_COV_20X: fraction of genome at >= 20× depth
+# Output: 3 tab-separated fields
+parse_mosdepth_global_dist() {
+  local dist_file="$1"
+  awk 'BEGIN { FS="\t"; median="NA"; pct10x="NA"; pct20x="NA"; last_depth_above_half=-1 }
+    $1 == "total" {
+      depth = $2 + 0
+      frac  = $3 + 0
+      if (depth == 10) pct10x = sprintf("%.4f", frac * 100)
+      if (depth == 20) pct20x = sprintf("%.4f", frac * 100)
+      if (frac >= 0.5) last_depth_above_half = depth
+    }
+    END {
+      if (last_depth_above_half >= 0) median = last_depth_above_half
+      printf "%s\t%s\t%s\n", median, pct10x, pct20x
+    }
+  ' "${dist_file}"
 }
 
 # ── Helper: parse BAS file ───────────────────────────────────────────────────
@@ -321,8 +397,10 @@ echo "Building QC table..."
 #   MEAN_INSERT_SIZE  INSERT_SIZE_SD  MEDIAN_INSERT_SIZE  INSERT_SIZE_MAD
 #   DUPLICATE_READS  DUPLICATE_BASES  PCT_MAPPED  PCT_DUPLICATE
 BAS_NA="NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA"
+DIST_NA="NA\tNA\tNA"
 
-HEADER="SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX"
+HEADER="SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX\tMITO_COV_RATIO"
+HEADER="${HEADER}\tMEDIAN_GENOME_COV\tPCT_GENOME_COV_10X\tPCT_GENOME_COV_20X"
 HEADER="${HEADER}\tTOTAL_BASES\tMAPPED_BASES\tTOTAL_READS\tMAPPED_READS"
 HEADER="${HEADER}\tMAPPED_READS_PAIRED\tMAPPED_READS_PROPERLY_PAIRED"
 HEADER="${HEADER}\tPCT_MISMATCHED_BASES\tAVG_QUALITY_MAPPED_BASES"
@@ -343,6 +421,15 @@ for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
   # Parse mosdepth summary
   mos_fields=$(parse_mosdepth_summary "${summary}")
 
+  # Parse mosdepth global coverage distribution (if available)
+  # The dist file has the same prefix as the summary but with .global.dist.txt suffix.
+  dist_file="${summary/${MOSDEPTH_SUMMARY_SUFFIX}/${MOSDEPTH_GLOBAL_DIST_SUFFIX}}"
+  if [[ -f "${dist_file}" ]]; then
+    dist_fields=$(parse_mosdepth_global_dist "${dist_file}")
+  else
+    dist_fields="${DIST_NA}"
+  fi
+
   # Parse BAS file if available
   bas_file="${BAS_DIR}/${sample_id}.bam.bas"
   if [[ -f "${bas_file}" ]]; then
@@ -352,7 +439,7 @@ for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
     MISSING_BAS=$(( MISSING_BAS + 1 ))
   fi
 
-  echo -e "${sample_id}\t${mos_fields}\t${bas_fields}" >> "${OUT_TSV}"
+  echo -e "${sample_id}\t${mos_fields}\t${dist_fields}\t${bas_fields}" >> "${OUT_TSV}"
   FOUND=$(( FOUND + 1 ))
 done
 

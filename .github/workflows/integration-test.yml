@@ -70,6 +70,25 @@ jobs:
           TEST_WORK="${RUNNER_TEMP}/bas_link_test"
           mkdir -p "${TEST_WORK}/bas_files"
 
+          # ── 0. Verify HTTPS alignment index URLs are accessible ──
+          # These are the production URLs used by 03_collect_qc.sh (config.sh defaults).
+          echo "=== Verifying HTTPS alignment index accessibility ==="
+          for idx_url in \
+            "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index" \
+            "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index"; do
+            echo -n "  Testing: ${idx_url} ... "
+            if curl -sSL --max-time 30 --head "${idx_url}" 2>/dev/null | grep -q "200"; then
+              echo "accessible (HTTP 200)"
+            elif curl -sSL --max-time 30 --range 0-0 -o /dev/null "${idx_url}" 2>/dev/null; then
+              echo "accessible (range request)"
+            elif wget --spider --timeout=30 "${idx_url}" 2>/dev/null; then
+              echo "accessible (wget spider)"
+            else
+              echo "WARNING: could not verify (may be a transient issue)"
+            fi
+          done
+          echo ""
+
           # ── 1. Download the GRCh38 high-coverage pilot alignment index (24 samples) ──
           # This is on GitHub (always accessible) and has known BAS file URLs.
           echo "=== Downloading pilot alignment index from IGSR GitHub ==="

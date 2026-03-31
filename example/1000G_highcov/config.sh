@@ -52,8 +52,11 @@ INDEX_FILE_698="${INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.se
 # NYGC 30x alignment indexes — list CRAM, CRAI, and BAS file FTP paths.
 # Used by 03_collect_qc.sh to discover and download .bam.bas QC files.
 # The alignment.index format has 6 TSV columns: CRAM  CRAM_MD5  CRAI  CRAI_MD5  BAS  BAS_MD5
-ALIGNMENT_INDEX_URL_2504="${ALIGNMENT_INDEX_URL_2504:-ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
-ALIGNMENT_INDEX_URL_698="${ALIGNMENT_INDEX_URL_698:-ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
+#
+# NOTE: HTTPS URLs are preferred over FTP (more reliable, avoids firewall issues).
+# The EBI mirrors all FTP content at https://ftp.1000genomes.ebi.ac.uk/...
+ALIGNMENT_INDEX_URL_2504="${ALIGNMENT_INDEX_URL_2504:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
+ALIGNMENT_INDEX_URL_698="${ALIGNMENT_INDEX_URL_698:-https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
 ALIGNMENT_INDEX_FILE_2504="${ALIGNMENT_INDEX_FILE_2504:-${WORK_DIR}/1000G_2504_high_coverage.GRCh38DH.alignment.index}"
 ALIGNMENT_INDEX_FILE_698="${ALIGNMENT_INDEX_FILE_698:-${WORK_DIR}/1000G_698_related_high_coverage.GRCh38DH.alignment.index}"
 MANIFEST="${MANIFEST:-${WORK_DIR}/manifest.tsv}"
