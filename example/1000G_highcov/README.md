@@ -308,7 +308,7 @@ RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 - `HQ_SD_COV` — Standard deviation of per-bin coverage for non-excluded autosomal bins. **Use case:** assess coverage uniformity in high-quality regions only.
 - `HQ_MAD_COV` — MAD of per-bin coverage for non-excluded autosomal bins. **Use case:** robust variability measure excluding problematic regions.
 - `HQ_IQR_COV` — IQR of per-bin coverage for non-excluded autosomal bins. **Use case:** spread of coverage in high-quality regions.
-- `MTDNA_CN` — Estimated mitochondrial DNA copy number, computed as 2 × chrM_mean_coverage / HQ_MEDIAN_COV. Diploid correction (×2) accounts for the autosomal reference being diploid. **Use case:** detect mitochondrial enrichment/depletion, sample QC.
+- `MTDNA_CN` — Estimated mitochondrial DNA copy number, computed as 2 × chrM_mean_coverage / HQ_MEDIAN_COV. Diploid correction (×2) accounts for the autosomal reference being diploid. Computed in `03_collect_qc.sh` using MITO_COV_RATIO × MEAN_AUTOSOMAL_COV as chrM_mean. `NA` when HQ_MEDIAN_COV is unavailable (requires `bedtools` + `BED_EXCLUDE`). **Use case:** detect mitochondrial enrichment/depletion, sample QC.
 
 **Sample metadata (IGSR panel)**
 - `POPULATION` — 3-letter population code (e.g. `GBR` = British, `YRI` = Yoruba, `CHB` = Han Chinese). 26 populations total. **Use case:** color PCA plots by ancestry, validate population stratification on PC1/PC2.
