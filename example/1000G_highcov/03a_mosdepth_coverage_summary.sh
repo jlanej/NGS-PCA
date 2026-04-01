@@ -67,10 +67,8 @@ OUT_TSV="${QC_OUTPUT}/mosdepth_coverage_summary.tsv"
 # HQ stats use only autosomal bins that do NOT overlap the exclusion BED,
 # providing a cleaner baseline for downstream metrics like mtDNA CN.
 HQ_ENABLED=0
-if command -v bedtools &>/dev/null; then
-  if [[ -n "${BED_EXCLUDE:-}" && -f "${BED_EXCLUDE}" ]]; then
-    HQ_ENABLED=1
-  fi
+if command -v bedtools &>/dev/null && [[ -n "${BED_EXCLUDE:-}" && -f "${BED_EXCLUDE}" ]]; then
+  HQ_ENABLED=1
 fi
 export HQ_ENABLED BED_EXCLUDE
 

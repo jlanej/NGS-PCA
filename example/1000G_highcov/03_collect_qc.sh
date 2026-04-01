@@ -206,8 +206,10 @@ for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
   fi
 
   # Compute mtDNA CN = 2 × chrM_mean / HQ_autosomal_median
-  # mos_fields: $1=auto_cov  $5=m_ratio (chrM/autosomal)
-  # cov_fields: $5=HQ_MEDIAN_COV (5th field of the 8-field cov_fields)
+  # Combined mos_fields + cov_fields layout (13 tab-separated fields):
+  #   $1=auto_cov  $2=x_ratio  $3=y_ratio  $4=inferred_sex  $5=m_ratio
+  #   $6=SD_COV  $7=MAD_COV  $8=IQR_COV  $9=MEDIAN_BIN_COV  $10=HQ_MEDIAN_COV
+  #   $11=HQ_SD_COV  $12=HQ_MAD_COV  $13=HQ_IQR_COV
   mtdna_cn=$(printf "%s\t%s" "${mos_fields}" "${cov_fields}" | awk -F'\t' '{
     auto_cov = $1 + 0; m_ratio = $5; hq_med = $10
     if (m_ratio != "NA" && auto_cov > 0 && hq_med != "NA" && hq_med + 0 > 0)
