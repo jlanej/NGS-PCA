@@ -19,7 +19,7 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
 | **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera/wget → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
-| **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) from mosdepth output | Parallelized (all cores) |
+| **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) and HQ statistics (non-excluded bins) from mosdepth output | Parallelized (all cores) |
 | **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
 
 All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:latest`), which bundles:
@@ -232,7 +232,9 @@ bash 03a_mosdepth_coverage_summary.sh
 bash 03_collect_qc.sh
 ```
 
-The coverage summary script (`03a_mosdepth_coverage_summary.sh`) reads the mosdepth `*.regions.bed.gz` files generated in step 1, extracts autosomal chromosome bins (chr1–22), and computes per-sample statistics: mean, median, standard deviation, MAD (median absolute deviation), and IQR (interquartile range). It auto-detects the mosdepth output directory and parallelizes across all available CPU cores using `xargs -P`.
+The coverage summary script (`03a_mosdepth_coverage_summary.sh`) reads the mosdepth `*.regions.bed.gz` files generated in step 1, extracts autosomal chromosome bins (chr1–22), and computes per-sample statistics: mean, median, standard deviation, MAD (median absolute deviation), and IQR (interquartile range). It auto-detects the mosdepth output directory and parallelizes across all available CPU cores using `xargs -P`. Progress is reported to stderr as samples complete.
+
+If `bedtools` is available and `BED_EXCLUDE` points to a valid file, the script also computes **HQ (high-quality)** variants of each statistic using only autosomal bins that do **not** overlap the exclusion BED. The HQ autosomal median is then used by `03_collect_qc.sh` to estimate mitochondrial DNA copy number (mtDNA CN = 2 × chrM_mean / HQ_median).
 
 The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources into a single table — `$WORK_DIR/qc_output/sample_qc.tsv` — that can be directly overlaid on PCA plots to demonstrate which batch effects are captured by each PC.
 
@@ -252,6 +254,9 @@ The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources int
 | **Coverage MAD** (autosomal bin MAD) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
 | **Coverage IQR** (autosomal bin IQR) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
 | **Median bin coverage** (autosomal) | `03a_mosdepth_coverage_summary.sh` | Computed from mosdepth regions |
+| **HQ median coverage** (non-excluded bins) | `03a_mosdepth_coverage_summary.sh` | Requires `bedtools` + `BED_EXCLUDE` |
+| **HQ SD / MAD / IQR** | `03a_mosdepth_coverage_summary.sh` | Requires `bedtools` + `BED_EXCLUDE` |
+| **mtDNA CN** (mitochondrial copy number) | Derived: 2 × chrM_mean / HQ_median | Computed in `03_collect_qc.sh` |
 | **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
 | **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
@@ -264,12 +269,13 @@ The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources int
 
 #### Output table columns
 
-The QC table contains 22 columns organized into 5 groups:
+The QC table contains 27 columns organized into 6 groups:
 
 ```
 SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX  MITO_COV_RATIO
 MEDIAN_GENOME_COV  PCT_GENOME_COV_10X  PCT_GENOME_COV_20X
 SD_COV  MAD_COV  IQR_COV  MEDIAN_BIN_COV
+HQ_MEDIAN_COV  HQ_SD_COV  HQ_MAD_COV  HQ_IQR_COV  MTDNA_CN
 POPULATION  SUPERPOPULATION  REPORTED_SEX  RELATEDNESS
 RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 ```
@@ -296,6 +302,13 @@ RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 - `MAD_COV` — Median absolute deviation of per-bin coverage. Robust alternative to SD, less sensitive to outliers. **Use case:** robust measure of coverage uniformity.
 - `IQR_COV` — Interquartile range (Q3 - Q1) of per-bin coverage. Captures spread of the middle 50% of bins. **Use case:** assess coverage variability, less sensitive to extreme outliers.
 - `MEDIAN_BIN_COV` — Median coverage across autosomal bins (1 kb bins from mosdepth). Similar to `MEDIAN_GENOME_COV` but computed from binned data. **Use case:** compare to mean coverage to assess skew.
+
+**High-quality coverage metrics (03a, requires bedtools + BED_EXCLUDE)**
+- `HQ_MEDIAN_COV` — Median coverage across autosomal bins that do **not** overlap the exclusion BED. Provides a cleaner baseline by excluding blacklisted, low-mappability, and structurally variant regions. **Use case:** baseline for mtDNA CN estimation and robust coverage assessment.
+- `HQ_SD_COV` — Standard deviation of per-bin coverage for non-excluded autosomal bins. **Use case:** assess coverage uniformity in high-quality regions only.
+- `HQ_MAD_COV` — MAD of per-bin coverage for non-excluded autosomal bins. **Use case:** robust variability measure excluding problematic regions.
+- `HQ_IQR_COV` — IQR of per-bin coverage for non-excluded autosomal bins. **Use case:** spread of coverage in high-quality regions.
+- `MTDNA_CN` — Estimated mitochondrial DNA copy number, computed as 2 × chrM_mean_coverage / HQ_MEDIAN_COV. Diploid correction (×2) accounts for the autosomal reference being diploid. **Use case:** detect mitochondrial enrichment/depletion, sample QC.
 
 **Sample metadata (IGSR panel)**
 - `POPULATION` — 3-letter population code (e.g. `GBR` = British, `YRI` = Yoruba, `CHB` = Han Chinese). 26 populations total. **Use case:** color PCA plots by ancestry, validate population stratification on PC1/PC2.
@@ -385,6 +398,7 @@ bash 00_setup.sh
 | `OVERSAMPLE` | `200` | Oversampling parameter |
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
+| `BED_EXCLUDE` | `../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz` (from `config.sh` dir, fallback `/app/resources/...`) | Exclusion BED for NGS-PCA and HQ autosomal coverage stats |
 | `ASPERA_BANDWIDTH` | `300m` | Aspera transfer speed limit |
 
 ---

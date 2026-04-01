@@ -21,6 +21,9 @@
 #       by 03a_mosdepth_coverage_summary.sh.  Per-bin autosomal coverage
 #       distribution statistics:
 #        - Median bin coverage, SD, MAD, IQR
+#        - HQ (high-quality) variants of each stat — bins not overlapping
+#          the exclusion BED used in step 2
+#        - mtDNA CN estimated from HQ autosomal median and chrM coverage
 #
 #   2. IGSR sample panel (integrated_call_samples_v3.*.ALL.ped) — downloaded
 #      during setup.  Provides:
@@ -144,21 +147,23 @@ parse_mosdepth_global_dist() {
 echo "Building QC table..."
 
 DIST_NA="NA\tNA\tNA"
-COV_SUMMARY_NA="NA\tNA\tNA\tNA"
+COV_SUMMARY_NA="NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA"
 
 HEADER="SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tX_COV_RATIO\tY_COV_RATIO\tINFERRED_SEX\tMITO_COV_RATIO"
 HEADER="${HEADER}\tMEDIAN_GENOME_COV\tPCT_GENOME_COV_10X\tPCT_GENOME_COV_20X"
 HEADER="${HEADER}\tSD_COV\tMAD_COV\tIQR_COV\tMEDIAN_BIN_COV"
+HEADER="${HEADER}\tHQ_MEDIAN_COV\tHQ_SD_COV\tHQ_MAD_COV\tHQ_IQR_COV\tMTDNA_CN"
 echo -e "${HEADER}" > "${OUT_TSV}"
 
 # Load coverage summary into an associative-style lookup (awk join later)
 # Format: SAMPLE_ID  MEAN_COV  MEDIAN_COV  SD_COV  MAD_COV  IQR_COV
+#         HQ_MEAN_COV  HQ_MEDIAN_COV  HQ_SD_COV  HQ_MAD_COV  HQ_IQR_COV
 if [[ -f "${COV_SUMMARY_TSV}" ]]; then
   echo "  Loading coverage summary from: ${COV_SUMMARY_TSV}"
   COV_SUMMARY_LOADED=1
 else
   echo "  WARNING: Coverage summary not found at ${COV_SUMMARY_TSV}."
-  echo "  Run 03a_mosdepth_coverage_summary.sh first for SD/MAD/IQR metrics."
+  echo "  Run 03a_mosdepth_coverage_summary.sh first for SD/MAD/IQR/HQ metrics."
   echo "  Those columns will be NA."
   COV_SUMMARY_LOADED=0
 fi
@@ -184,20 +189,36 @@ for summary in "${MOSDEPTH_DIR}"/*"${MOSDEPTH_SUMMARY_SUFFIX}"; do
     dist_fields="${DIST_NA}"
   fi
 
-  # Look up coverage summary stats (SD, MAD, IQR, MEDIAN_BIN_COV)
+  # Look up coverage summary stats (SD, MAD, IQR, MEDIAN_BIN_COV, HQ stats)
+  # Coverage summary columns: $1=SAMPLE_ID $2=MEAN_COV $3=MEDIAN_COV
+  #   $4=SD_COV $5=MAD_COV $6=IQR_COV $7=HQ_MEAN_COV $8=HQ_MEDIAN_COV
+  #   $9=HQ_SD_COV $10=HQ_MAD_COV $11=HQ_IQR_COV
   if [[ "${COV_SUMMARY_LOADED}" -eq 1 ]]; then
     cov_fields=$(awk -F'\t' -v sid="${sample_id}" '
       NR > 1 && $1 == sid {
-        printf "%s\t%s\t%s\t%s\n", $4, $5, $6, $2
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", $4, $5, $6, $3, $8, $9, $10, $11
         found = 1; exit
       }
-      END { if (!found) printf "NA\tNA\tNA\tNA\n" }
+      END { if (!found) printf "NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\n" }
     ' "${COV_SUMMARY_TSV}")
   else
     cov_fields="${COV_SUMMARY_NA}"
   fi
 
-  echo -e "${sample_id}\t${mos_fields}\t${dist_fields}\t${cov_fields}" >> "${OUT_TSV}"
+  # Compute mtDNA CN = 2 × chrM_mean / HQ_autosomal_median
+  # Combined mos_fields + cov_fields layout (13 tab-separated fields):
+  #   $1=auto_cov  $2=x_ratio  $3=y_ratio  $4=inferred_sex  $5=m_ratio
+  #   $6=SD_COV  $7=MAD_COV  $8=IQR_COV  $9=MEDIAN_BIN_COV  $10=HQ_MEDIAN_COV
+  #   $11=HQ_SD_COV  $12=HQ_MAD_COV  $13=HQ_IQR_COV
+  mtdna_cn=$(printf "%s\t%s" "${mos_fields}" "${cov_fields}" | awk -F'\t' '{
+    auto_cov = $1 + 0; m_ratio = $5; hq_med = $10
+    if (m_ratio != "NA" && auto_cov > 0 && hq_med != "NA" && hq_med + 0 > 0)
+      printf "%.4f\n", 2 * m_ratio * auto_cov / (hq_med + 0)
+    else
+      print "NA"
+  }')
+
+  echo -e "${sample_id}\t${mos_fields}\t${dist_fields}\t${cov_fields}\t${mtdna_cn}" >> "${OUT_TSV}"
   FOUND=$(( FOUND + 1 ))
 done
 
