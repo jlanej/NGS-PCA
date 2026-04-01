@@ -398,6 +398,7 @@ bash 00_setup.sh
 | `OVERSAMPLE` | `200` | Oversampling parameter |
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
+| `BED_EXCLUDE` | `../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz` (from `config.sh` dir, fallback `/app/resources/...`) | Exclusion BED for NGS-PCA and HQ autosomal coverage stats |
 | `ASPERA_BANDWIDTH` | `300m` | Aspera transfer speed limit |
 
 ---

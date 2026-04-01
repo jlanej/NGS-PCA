@@ -13,6 +13,9 @@
 
 set -euo pipefail
 
+# Directory containing this config file (used for repository-relative defaults)
+CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ── Working directories (adjust to your HPC environment) ─────────────────────
 WORK_DIR="${WORK_DIR:-/scratch/${USER}/1000G_highcov}"
 CRAM_DIR="${CRAM_DIR:-${WORK_DIR}/crams}"
@@ -89,7 +92,14 @@ OVERSAMPLE="${OVERSAMPLE:-200}"
 RANDOM_SEED="${RANDOM_SEED:-42}"
 NGSPCA_THREADS="${NGSPCA_THREADS:-32}"
 SAMPLE_EVERY="${SAMPLE_EVERY:-0}"
-BED_EXCLUDE="${BED_EXCLUDE:-/app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz}"
+BED_EXCLUDE_REPO_DEFAULT="${CONFIG_DIR}/../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz"
+BED_EXCLUDE_CONTAINER_DEFAULT="/app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz"
+if [[ -f "${BED_EXCLUDE_REPO_DEFAULT}" ]]; then
+  BED_EXCLUDE_DEFAULT="${BED_EXCLUDE_REPO_DEFAULT}"
+else
+  BED_EXCLUDE_DEFAULT="${BED_EXCLUDE_CONTAINER_DEFAULT}"
+fi
+BED_EXCLUDE="${BED_EXCLUDE:-${BED_EXCLUDE_DEFAULT}}"
 # Java heap size — set slightly below SBATCH --mem to leave OS headroom.
 # For 3,202 samples × 200 PCs with SBATCH --mem=256G, 240g is appropriate.
 XMX="${XMX:-240g}"
