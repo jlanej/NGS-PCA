@@ -23,12 +23,19 @@
 # scales linearly with the number of cores.
 #
 # Usage:
-#   bash 03a_mosdepth_coverage_summary.sh
+#   # Submit directly as a SLURM job (recommended):
+#   sbatch 03a_mosdepth_coverage_summary.sh
 #
-#   # Or submit as a SLURM job (benefits from many cores):
-#   sbatch --cpus-per-task=$(nproc) --mem=8G --time=00:30:00 \
-#     --wrap="bash 03a_mosdepth_coverage_summary.sh"
+#   # Or run interactively:
+#   bash 03a_mosdepth_coverage_summary.sh
 # =============================================================================
+
+#SBATCH --job-name=cov_summary
+#SBATCH --output=logs/cov_summary_%j.out
+#SBATCH --error=logs/cov_summary_%j.err
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=48G
+#SBATCH --time=04:00:00
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +51,7 @@ else
 fi
 source "${CONFIG_FILE}"
 
-mkdir -p "${QC_OUTPUT}"
+mkdir -p "${LOG_DIR}" "${QC_OUTPUT}"
 
 # ── Auto-detect mosdepth directory ──────────────────────────────────────────
 if [[ ! -d "${MOSDEPTH_DIR}" ]]; then
