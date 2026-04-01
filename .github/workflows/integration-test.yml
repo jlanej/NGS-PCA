@@ -126,7 +126,11 @@ jobs:
           fi
           echo "PASS: Got ${NROWS} sample rows"
 
-          # Validate sampleA values (5 autosomal bins: 10,20,30,40,50)
+          # Validate sampleA values (5 autosomal bins: 10,20,30,40,50; chrX bin excluded)
+          # Expected: mean=30, median=30, sd=15.8114 (sample SD), mad=10, iqr=20
+          #   Q1 at position floor(n/4)+1=2 → 20, Q3 at position floor(3n/4)+1=4 → 40, IQR=20
+          #   MAD = median of |10-30|=20,|20-30|=10,|30-30|=0,|40-30|=10,|50-30|=20 → sorted
+          #         [0,10,10,20,20], median at pos 3 = 10
           SAMPLE_A=$(awk -F'\t' '$1 == "sampleA"' "${OUT}")
           if [[ -z "${SAMPLE_A}" ]]; then
             echo "::error::sampleA not found in output"
@@ -134,14 +138,18 @@ jobs:
           fi
           MEAN_A=$(echo "${SAMPLE_A}" | cut -f2)
           MEDIAN_A=$(echo "${SAMPLE_A}" | cut -f3)
-          echo "  sampleA: mean=${MEAN_A}, median=${MEDIAN_A}"
+          SD_A=$(echo "${SAMPLE_A}" | cut -f4)
+          MAD_A=$(echo "${SAMPLE_A}" | cut -f5)
+          IQR_A=$(echo "${SAMPLE_A}" | cut -f6)
+          echo "  sampleA: mean=${MEAN_A}, median=${MEDIAN_A}, sd=${SD_A}, mad=${MAD_A}, iqr=${IQR_A}"
 
-          # Mean should be 30.0000
+          # Mean should be 30.0000 (chrX bin with 15.0 must be excluded — autosomal only)
+          # If chrX were included: mean=(10+20+30+40+50+15)/6=27.5 ≠ 30
           if [[ "${MEAN_A}" != "30.0000" ]]; then
-            echo "::error::sampleA mean expected 30.0000, got ${MEAN_A}"
+            echo "::error::sampleA mean expected 30.0000, got ${MEAN_A} (chrX bin may not be excluded)"
             exit 1
           fi
-          echo "PASS: sampleA mean correct"
+          echo "PASS: sampleA mean correct (chrX excluded)"
 
           # Median should be 30.0000
           if [[ "${MEDIAN_A}" != "30.0000" ]]; then
@@ -150,19 +158,57 @@ jobs:
           fi
           echo "PASS: sampleA median correct"
 
+          # SD should be 15.8114 (sample SD, divides by n-1=4)
+          # sqrt(((10-30)^2+(20-30)^2+(30-30)^2+(40-30)^2+(50-30)^2)/4) = sqrt(250) = 15.8114
+          if [[ "${SD_A}" != "15.8114" ]]; then
+            echo "::error::sampleA SD expected 15.8114 (sample SD), got ${SD_A}"
+            exit 1
+          fi
+          echo "PASS: sampleA SD correct (sample standard deviation)"
+
+          # MAD should be 10.0000
+          if [[ "${MAD_A}" != "10.0000" ]]; then
+            echo "::error::sampleA MAD expected 10.0000, got ${MAD_A}"
+            exit 1
+          fi
+          echo "PASS: sampleA MAD correct"
+
+          # IQR should be 20.0000 (Q3=40 at pos 4, Q1=20 at pos 2; IQR=40-20=20)
+          if [[ "${IQR_A}" != "20.0000" ]]; then
+            echo "::error::sampleA IQR expected 20.0000, got ${IQR_A}"
+            exit 1
+          fi
+          echo "PASS: sampleA IQR correct"
+
           # Validate sampleB values (4 bins all 25: mean=25, median=25, sd=0, mad=0, iqr=0)
           SAMPLE_B=$(awk -F'\t' '$1 == "sampleB"' "${OUT}")
           MEAN_B=$(echo "${SAMPLE_B}" | cut -f2)
+          MEDIAN_B=$(echo "${SAMPLE_B}" | cut -f3)
           SD_B=$(echo "${SAMPLE_B}" | cut -f4)
+          MAD_B=$(echo "${SAMPLE_B}" | cut -f5)
+          IQR_B=$(echo "${SAMPLE_B}" | cut -f6)
+          echo "  sampleB: mean=${MEAN_B}, median=${MEDIAN_B}, sd=${SD_B}, mad=${MAD_B}, iqr=${IQR_B}"
           if [[ "${MEAN_B}" != "25.0000" ]]; then
             echo "::error::sampleB mean expected 25.0000, got ${MEAN_B}"
+            exit 1
+          fi
+          if [[ "${MEDIAN_B}" != "25.0000" ]]; then
+            echo "::error::sampleB median expected 25.0000, got ${MEDIAN_B}"
             exit 1
           fi
           if [[ "${SD_B}" != "0.0000" ]]; then
             echo "::error::sampleB SD expected 0.0000, got ${SD_B}"
             exit 1
           fi
-          echo "PASS: sampleB values correct (uniform coverage)"
+          if [[ "${MAD_B}" != "0.0000" ]]; then
+            echo "::error::sampleB MAD expected 0.0000, got ${MAD_B}"
+            exit 1
+          fi
+          if [[ "${IQR_B}" != "0.0000" ]]; then
+            echo "::error::sampleB IQR expected 0.0000, got ${IQR_B}"
+            exit 1
+          fi
+          echo "PASS: sampleB values correct (uniform coverage: SD=MAD=IQR=0)"
 
           echo ""
           echo "=== All mosdepth coverage summary tests passed ==="
@@ -211,15 +257,36 @@ jobs:
           echo "=== QC table output ==="
           cat "${OUT}"
 
-          # Verify header includes new coverage columns
+          # ── Verify column structure ───────────────────────────────────────────
           HEADER=$(head -1 "${OUT}")
-          for col in SD_COV MAD_COV IQR_COV MEDIAN_BIN_COV; do
-            if ! echo "${HEADER}" | grep -q "${col}"; then
+
+          # Verify all expected coverage/QC columns are present
+          for col in MEAN_AUTOSOMAL_COV X_COV_RATIO Y_COV_RATIO INFERRED_SEX MITO_COV_RATIO \
+                     MEDIAN_GENOME_COV PCT_GENOME_COV_10X PCT_GENOME_COV_20X \
+                     SD_COV MAD_COV IQR_COV MEDIAN_BIN_COV \
+                     HQ_MEDIAN_COV HQ_SD_COV HQ_MAD_COV HQ_IQR_COV MTDNA_CN; do
+            if ! echo "${HEADER}" | grep -qw "${col}"; then
               echo "::error::Missing column ${col} in header"
               exit 1
             fi
           done
-          echo "PASS: All expected columns present in header"
+          echo "PASS: All expected QC columns present in header"
+
+          # Verify the 18-column header order (before panel/manifest joins)
+          # Columns must appear in this exact order: mosdepth summary → dist → cov variability → HQ+MTDNA_CN
+          EXPECTED_HEADER=$(printf '%s\t' \
+            SAMPLE_ID MEAN_AUTOSOMAL_COV X_COV_RATIO Y_COV_RATIO INFERRED_SEX MITO_COV_RATIO \
+            MEDIAN_GENOME_COV PCT_GENOME_COV_10X PCT_GENOME_COV_20X \
+            SD_COV MAD_COV IQR_COV MEDIAN_BIN_COV \
+            HQ_MEDIAN_COV HQ_SD_COV HQ_MAD_COV HQ_IQR_COV MTDNA_CN \
+            | sed 's/\t$//')
+          if [[ "${HEADER}" != "${EXPECTED_HEADER}" ]]; then
+            echo "::error::QC table header order mismatch."
+            echo "  Expected: $(echo "${EXPECTED_HEADER}" | tr '\t' '|')"
+            echo "  Got:      $(echo "${HEADER}" | tr '\t' '|')"
+            exit 1
+          fi
+          echo "PASS: QC table header order correct (18 columns)"
 
           # Verify no BAS columns remain
           for col in TOTAL_BASES MAPPED_BASES DUPLICATE_READS PCT_DUPLICATE; do
@@ -230,14 +297,70 @@ jobs:
           done
           echo "PASS: No BAS columns in header"
 
-          # Verify coverage summary values were joined
-          DATA=$(tail -1 "${OUT}")
-          if echo "${DATA}" | grep -q "5.1234"; then
-            echo "PASS: Coverage summary SD_COV value joined correctly"
-          else
-            echo "::error::Coverage summary values not found in QC table"
-            exit 1
-          fi
+          # ── Verify computed metric values ─────────────────────────────────────
+          # Column assignments (1-based):
+          #  1=SAMPLE_ID  2=MEAN_AUTOSOMAL_COV  3=X_COV_RATIO  4=Y_COV_RATIO
+          #  5=INFERRED_SEX  6=MITO_COV_RATIO  7=MEDIAN_GENOME_COV
+          #  8=PCT_GENOME_COV_10X  9=PCT_GENOME_COV_20X
+          # 10=SD_COV  11=MAD_COV  12=IQR_COV  13=MEDIAN_BIN_COV
+          # 14=HQ_MEDIAN_COV  15=HQ_SD_COV  16=HQ_MAD_COV  17=HQ_IQR_COV
+          # 18=MTDNA_CN
+          DATA=$(awk -F'\t' 'NR==2' "${OUT}")
+
+          check_field() {
+            local field_name="$1" col_num="$2" expected="$3"
+            local actual
+            actual=$(echo "${DATA}" | cut -f"${col_num}")
+            if [[ "${actual}" != "${expected}" ]]; then
+              echo "::error::${field_name} (col ${col_num}): expected '${expected}', got '${actual}'"
+              exit 1
+            fi
+            echo "PASS: ${field_name} = ${actual}"
+          }
+
+          # MEAN_AUTOSOMAL_COV: chr1(30×) and chr2(30×), length-weighted avg = 30.0000
+          # chrX/Y/M are excluded from autosomal mean
+          check_field "MEAN_AUTOSOMAL_COV" 2 "30.0000"
+
+          # X_COV_RATIO: chrX_mean(15.00) / auto_mean(30.00) = 0.5000
+          check_field "X_COV_RATIO" 3 "0.5000"
+
+          # Y_COV_RATIO: chrY_mean(5.00) / auto_mean(30.00) = 0.1667
+          check_field "Y_COV_RATIO" 4 "0.1667"
+
+          # INFERRED_SEX: Y_ratio(0.1667)>0.1 AND X_ratio(0.5000)<0.75 → M
+          check_field "INFERRED_SEX" 5 "M"
+
+          # MITO_COV_RATIO: chrM_mean(50.00) / auto_mean(30.00) = 1.6667
+          check_field "MITO_COV_RATIO" 6 "1.6667"
+
+          # MEDIAN_GENOME_COV: last depth where cumulative fraction ≥ 0.5
+          # From dist: depth=30 has fraction=0.51 ≥ 0.5; depth=31 has 0.49 < 0.5 → median=30
+          check_field "MEDIAN_GENOME_COV" 7 "30"
+
+          # PCT_GENOME_COV_10X: fraction at depth=10 (0.9500) × 100 = 95.0000
+          check_field "PCT_GENOME_COV_10X" 8 "95.0000"
+
+          # PCT_GENOME_COV_20X: fraction at depth=20 (0.9000) × 100 = 90.0000
+          check_field "PCT_GENOME_COV_20X" 9 "90.0000"
+
+          # Coverage variability columns parsed from coverage summary (cols $4,$5,$6,$3 of summary)
+          check_field "SD_COV" 10 "5.1234"
+          check_field "MAD_COV" 11 "3.4567"
+          check_field "IQR_COV" 12 "7.8901"
+          # MEDIAN_BIN_COV comes from MEDIAN_COV ($3) of the coverage summary, not SD/MAD/IQR
+          check_field "MEDIAN_BIN_COV" 13 "30.0000"
+
+          # HQ coverage columns parsed from coverage summary (cols $8,$9,$10,$11 of summary)
+          check_field "HQ_MEDIAN_COV" 14 "29.0000"
+          check_field "HQ_SD_COV" 15 "4.5678"
+          check_field "HQ_MAD_COV" 16 "2.3456"
+          check_field "HQ_IQR_COV" 17 "6.7890"
+
+          # MTDNA_CN: 2 × chrM_mean / HQ_MEDIAN_COV
+          #         = 2 × 50.00 / 29.0000 = 3.4483
+          # Code path: 2 × MITO_COV_RATIO × MEAN_AUTOSOMAL_COV / HQ_MEDIAN_COV, which expands to the same
+          check_field "MTDNA_CN" 18 "3.4483"
 
           echo ""
           echo "=== All QC table integration tests passed ==="
