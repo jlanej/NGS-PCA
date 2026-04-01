@@ -111,7 +111,7 @@ jobs:
 
           # Check header
           HEADER=$(head -1 "${OUT}")
-          EXPECTED_HEADER="SAMPLE_ID	MEAN_COV	MEDIAN_COV	SD_COV	MAD_COV	IQR_COV"
+          EXPECTED_HEADER="SAMPLE_ID	MEAN_COV	MEDIAN_COV	SD_COV	MAD_COV	IQR_COV	HQ_MEAN_COV	HQ_MEDIAN_COV	HQ_SD_COV	HQ_MAD_COV	HQ_IQR_COV"
           if [[ "${HEADER}" != "${EXPECTED_HEADER}" ]]; then
             echo "::error::Header mismatch. Got: ${HEADER}"
             exit 1
@@ -189,8 +189,8 @@ jobs:
           printf "total\t31\t0.4900\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
 
           # ── Create synthetic coverage summary ──
-          printf "SAMPLE_ID\tMEAN_COV\tMEDIAN_COV\tSD_COV\tMAD_COV\tIQR_COV\n" > "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
-          printf "testSample\t30.0000\t30.0000\t5.1234\t3.4567\t7.8901\n" >> "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
+          printf "SAMPLE_ID\tMEAN_COV\tMEDIAN_COV\tSD_COV\tMAD_COV\tIQR_COV\tHQ_MEAN_COV\tHQ_MEDIAN_COV\tHQ_SD_COV\tHQ_MAD_COV\tHQ_IQR_COV\n" > "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
+          printf "testSample\t30.0000\t30.0000\t5.1234\t3.4567\t7.8901\t29.0000\t29.0000\t4.5678\t2.3456\t6.7890\n" >> "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
 
           # ── Run 03_collect_qc.sh ──
           echo "=== Running 03_collect_qc.sh ==="
