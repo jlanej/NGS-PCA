@@ -267,36 +267,28 @@ else
   # Extract relevant columns from PED file (tab-separated, skip header if present)
   # Derive superpopulation from population code, and derive relatedness from
   # paternal_id ($3) and maternal_id ($4): both "0" or empty → unrelated.
-  awk 'BEGIN {
-    # 1000G Phase 3 population-to-superpopulation mapping (26 populations)
+
+  # 1000G Phase 3 population-to-superpopulation mapping (26 populations)
+  POP_TO_SUPERPOP='
     sp["ACB"]="AFR"; sp["ASW"]="AFR"; sp["ESN"]="AFR"; sp["GWD"]="AFR"
     sp["LWK"]="AFR"; sp["MSL"]="AFR"; sp["YRI"]="AFR"
     sp["CLM"]="AMR"; sp["MXL"]="AMR"; sp["PEL"]="AMR"; sp["PUR"]="AMR"
     sp["CDX"]="EAS"; sp["CHB"]="EAS"; sp["CHS"]="EAS"; sp["JPT"]="EAS"; sp["KHV"]="EAS"
     sp["CEU"]="EUR"; sp["FIN"]="EUR"; sp["GBR"]="EUR"; sp["IBS"]="EUR"; sp["TSI"]="EUR"
     sp["BEB"]="SAS"; sp["GIH"]="SAS"; sp["ITU"]="SAS"; sp["PJL"]="SAS"; sp["STU"]="SAS"
-  }
-  NR > 1 {
+  '
+  EXTRACT_BODY='{
     sex_label  = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
     rel_label  = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
     superpop   = ($7 in sp) ? sp[$7] : "NA"
     print $2 "\t" $7 "\t" superpop "\t" sex_label "\t" $8 "\t" rel_label
-  }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}" 2>/dev/null || \
+  }'
+
+  awk "BEGIN { ${POP_TO_SUPERPOP} } NR > 1 ${EXTRACT_BODY}" \
+    OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}" 2>/dev/null || \
   # Fallback: some PED files lack a header line — process all rows
-  awk 'BEGIN {
-    sp["ACB"]="AFR"; sp["ASW"]="AFR"; sp["ESN"]="AFR"; sp["GWD"]="AFR"
-    sp["LWK"]="AFR"; sp["MSL"]="AFR"; sp["YRI"]="AFR"
-    sp["CLM"]="AMR"; sp["MXL"]="AMR"; sp["PEL"]="AMR"; sp["PUR"]="AMR"
-    sp["CDX"]="EAS"; sp["CHB"]="EAS"; sp["CHS"]="EAS"; sp["JPT"]="EAS"; sp["KHV"]="EAS"
-    sp["CEU"]="EUR"; sp["FIN"]="EUR"; sp["GBR"]="EUR"; sp["IBS"]="EUR"; sp["TSI"]="EUR"
-    sp["BEB"]="SAS"; sp["GIH"]="SAS"; sp["ITU"]="SAS"; sp["PJL"]="SAS"; sp["STU"]="SAS"
-  }
-  {
-    sex_label  = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    rel_label  = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
-    superpop   = ($7 in sp) ? sp[$7] : "NA"
-    print $2 "\t" $7 "\t" superpop "\t" sex_label "\t" $8 "\t" rel_label
-  }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}"
+  awk "BEGIN { ${POP_TO_SUPERPOP} } ${EXTRACT_BODY}" \
+    OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}"
 
   # Join QC table with panel on SAMPLE_ID (column 1)
   MERGED_TSV="${QC_OUTPUT}/.merged.tmp"
