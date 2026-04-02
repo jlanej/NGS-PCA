@@ -258,9 +258,10 @@ The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources int
 | **HQ SD / MAD / IQR** | `03a_mosdepth_coverage_summary.sh` | Requires `bedtools` + `BED_EXCLUDE` |
 | **mtDNA CN** (mitochondrial copy number) | Derived: 2 × chrM_mean / HQ_median | Computed in `03_collect_qc.sh` |
 | **Population** (e.g. GBR, YRI) | IGSR sample panel | Downloaded once during setup |
-| **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | IGSR sample panel | Downloaded once during setup |
+| **Superpopulation** (AFR/AMR/EAS/EUR/SAS) | Derived from population code | Pop→superpop lookup in `03_collect_qc.sh` |
 | **Reported sex** | IGSR sample panel | Downloaded once during setup |
-| **Relatedness** (unrelated/related) | IGSR sample panel (PED) | Derived from paternal/maternal IDs |
+| **Family role** (father/mother/child/unrel…) | IGSR sample panel (PED col 8) | PED "Relationship" field |
+| **Relatedness** (unrelated/related) | Derived from PED parental IDs | Both parents "0" → unrelated |
 | **Release batch** (2504 or 698) | Manifest (`manifest.tsv`) | Tagged by source sequence.index file |
 | **Sequencing center** | Manifest (sequence.index col 6) | Parsed during setup — expected `NYGC` for all |
 | **Study ID** | Manifest (sequence.index col 4) | Parsed during setup — study accession |
@@ -269,14 +270,14 @@ The QC collection script (`03_collect_qc.sh`) then aggregates all QC sources int
 
 #### Output table columns
 
-The QC table contains 27 columns organized into 6 groups:
+The QC table contains 28 columns organized into 6 groups:
 
 ```
 SAMPLE_ID  MEAN_AUTOSOMAL_COV  X_COV_RATIO  Y_COV_RATIO  INFERRED_SEX  MITO_COV_RATIO
 MEDIAN_GENOME_COV  PCT_GENOME_COV_10X  PCT_GENOME_COV_20X
 SD_COV  MAD_COV  IQR_COV  MEDIAN_BIN_COV
 HQ_MEDIAN_COV  HQ_SD_COV  HQ_MAD_COV  HQ_IQR_COV  MTDNA_CN
-POPULATION  SUPERPOPULATION  REPORTED_SEX  RELATEDNESS
+POPULATION  SUPERPOPULATION  REPORTED_SEX  FAMILY_ROLE  RELATEDNESS
 RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 ```
 
@@ -312,9 +313,10 @@ RELEASE_BATCH  CENTER_NAME  STUDY_ID  INSTRUMENT_MODEL  LIBRARY_NAME
 
 **Sample metadata (IGSR panel)**
 - `POPULATION` — 3-letter population code (e.g. `GBR` = British, `YRI` = Yoruba, `CHB` = Han Chinese). 26 populations total. **Use case:** color PCA plots by ancestry, validate population stratification on PC1/PC2.
-- `SUPERPOPULATION` — Continental ancestry group: `AFR` (African), `AMR` (Admixed American), `EAS` (East Asian), `EUR` (European), `SAS` (South Asian). **Use case:** demonstrate population structure in PCA.
+- `SUPERPOPULATION` — Continental ancestry group derived from `POPULATION` via a lookup table: `AFR` (African), `AMR` (Admixed American), `EAS` (East Asian), `EUR` (European), `SAS` (South Asian). The IGSR PED file does not contain a superpopulation column; it is mapped from the 26 population codes. **Use case:** demonstrate population structure in PCA.
 - `REPORTED_SEX` — Self-reported sex from IGSR metadata (`M` or `F`). **Use case:** compare to inferred sex for QC.
-- `RELATEDNESS` — `unrelated` if both parents unknown in the pedigree (PED), otherwise `related`. **Use case:** identify related individuals (parent-offspring, siblings) that may cluster in PCA.
+- `FAMILY_ROLE` — PED Relationship field (column 8). Describes the individual's declared role in the family pedigree: `unrel` (unrelated, no family members in the dataset), `father`, `mother`, `child`, `pat` (paternal grandfather/uncle), `mat` (maternal grandmother/aunt), or other family descriptors. **Use case:** identify family structure and understand sample composition.
+- `RELATEDNESS` — Derived from PED parental IDs: `unrelated` if both paternal and maternal IDs are `0` (founders or unrelated individuals), otherwise `related` (individuals with known parents in the pedigree). **Note:** `FAMILY_ROLE` and `RELATEDNESS` are complementary but not fully concordant — a `father` typically has `RELATEDNESS = unrelated` because founders have `0/0` parental IDs, while his `child` has `RELATEDNESS = related` because parental IDs are filled in. A small number of `unrel` individuals have non-zero parental IDs, giving `RELATEDNESS = related`. **Use case:** identify related individuals (parent-offspring, siblings) that may cluster in PCA.
 
 **Sequencing batch metadata (manifest)**
 - `RELEASE_BATCH` — Data release batch: `2504` (unrelated samples) or `698` (related samples). **Use case:** identify batch effects between the two sequencing releases.
