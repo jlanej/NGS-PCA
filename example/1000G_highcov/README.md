@@ -83,7 +83,7 @@ The `output/` directory in this repository contains the full results of running 
 | File | Rows | Description |
 |---|---|---|
 | `svd.pcs.txt` | 3,203 (1 header + 3,202 samples) | Sample-by-PC matrix: 200 principal components for each of the 3,202 samples |
-| `svd.singularvalues.txt` | 200 | Singular values for each of the 200 computed PCs (proxy for variance explained) |
+| `svd.singularvalues.txt` | 201 (1 header + 200 PCs) | Singular values for each of the 200 computed PCs (proxy for variance explained) |
 | `svd.bins.txt` | 142,070 | Genomic bins (mosdepth regions) retained after filtering, in the row order used by the loadings matrix |
 | `svd.samples.txt` | 3,202 | Sample identifiers in the row order of `svd.pcs.txt` |
 
