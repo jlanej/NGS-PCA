@@ -26,11 +26,12 @@
 #        - mtDNA CN estimated from HQ autosomal median and chrM coverage
 #
 #   2. IGSR sample panel (integrated_call_samples_v3.*.ALL.ped) — downloaded
-#      during setup.  Provides:
-#        - Population (e.g. GBR, YRI, CHB)
-#        - Superpopulation (AFR, AMR, EAS, EUR, SAS)
-#        - Reported sex
-#        - Relatedness (unrelated vs related, from paternal/maternal IDs)
+#      during setup.  PED file has 12 columns; we extract:
+#        - Population ($7, e.g. GBR, YRI, CHB)
+#        - Superpopulation — derived from population via lookup (AFR/AMR/EAS/EUR/SAS)
+#        - Reported sex ($5, 1=M / 2=F)
+#        - Family role ($8, PED Relationship: father, mother, child, unrel …)
+#        - Relatedness — derived: both parental IDs "0" → unrelated, else related
 #
 #   3. Sample manifest (manifest.tsv) — built during setup from the two NYGC
 #      sequence.index files.  Provides batch-level annotations:
@@ -225,9 +226,36 @@ done
 echo "  Processed ${FOUND} samples."
 
 # ── Join with IGSR sample panel ──────────────────────────────────────────────
-# The PED file columns: family_id sample_id paternal maternal sex phenotype pop superpop
-# We extract: sample_id, pop, superpop, reported_sex (1=male,2=female),
-# and relatedness (paternal_id and maternal_id both "0" → unrelated).
+# The PED file (integrated_call_samples_v3.*.ALL.ped) has 12 tab-separated
+# columns with header:
+#   1  Family ID       6  Phenotype      11  Third Order
+#   2  Individual ID   7  Population     12  Other Comments
+#   3  Paternal ID     8  Relationship
+#   4  Maternal ID     9  Siblings
+#   5  Gender          10 Second Order
+#
+# NOTE: The PED file does NOT contain a SuperPopulation column.  We derive it
+#       from the Population code ($7) using the standard 1000G Phase 3 mapping:
+#         AFR: ACB ASW ESN GWD LWK MSL YRI
+#         AMR: CLM MXL PEL PUR
+#         EAS: CDX CHB CHS JPT KHV
+#         EUR: CEU FIN GBR IBS TSI
+#         SAS: BEB GIH ITU PJL STU
+#
+# Two relatedness annotations are produced — they are complementary:
+#   FAMILY_ROLE  — the PED Relationship field ($8).  Describes each
+#                  individual's declared role in the family structure
+#                  (e.g. father, mother, child, unrel).
+#   RELATEDNESS  — derived from paternal ($3) and maternal ($4) IDs.
+#                  "unrelated" when both are "0" or empty (founders /
+#                  unrelated individuals), "related" otherwise (children
+#                  with known parents in the pedigree).
+#
+# These two fields are NOT fully concordant.  For example a "father" has
+# RELATEDNESS = "unrelated" because founder parents are coded as 0/0 in the
+# PED, while his child has RELATEDNESS = "related" because the parental IDs
+# are filled in.  Conversely a small number of "unrel" individuals have non-
+# zero parental IDs in the PED, giving RELATEDNESS = "related".
 echo "Joining with sample panel metadata..."
 
 if [[ ! -f "${PANEL_FILE}" ]]; then
@@ -237,31 +265,50 @@ if [[ ! -f "${PANEL_FILE}" ]]; then
 else
   PANEL_TSV="${QC_OUTPUT}/.panel_extracted.tmp"
   # Extract relevant columns from PED file (tab-separated, skip header if present)
-  # Also derive relatedness: if paternal_id ($3) and maternal_id ($4) are both
-  # "0" or empty → unrelated (standard PED convention for unknown parents).
-  awk 'NR > 1 {
-    sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
-    print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
+  # Derive superpopulation from population code, and derive relatedness from
+  # paternal_id ($3) and maternal_id ($4): both "0" or empty → unrelated.
+  awk 'BEGIN {
+    # 1000G Phase 3 population-to-superpopulation mapping (26 populations)
+    sp["ACB"]="AFR"; sp["ASW"]="AFR"; sp["ESN"]="AFR"; sp["GWD"]="AFR"
+    sp["LWK"]="AFR"; sp["MSL"]="AFR"; sp["YRI"]="AFR"
+    sp["CLM"]="AMR"; sp["MXL"]="AMR"; sp["PEL"]="AMR"; sp["PUR"]="AMR"
+    sp["CDX"]="EAS"; sp["CHB"]="EAS"; sp["CHS"]="EAS"; sp["JPT"]="EAS"; sp["KHV"]="EAS"
+    sp["CEU"]="EUR"; sp["FIN"]="EUR"; sp["GBR"]="EUR"; sp["IBS"]="EUR"; sp["TSI"]="EUR"
+    sp["BEB"]="SAS"; sp["GIH"]="SAS"; sp["ITU"]="SAS"; sp["PJL"]="SAS"; sp["STU"]="SAS"
+  }
+  NR > 1 {
+    sex_label  = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
+    rel_label  = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
+    superpop   = ($7 in sp) ? sp[$7] : "NA"
+    print $2 "\t" $7 "\t" superpop "\t" sex_label "\t" $8 "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}" 2>/dev/null || \
   # Fallback: some PED files lack a header line — process all rows
-  awk '{
-    sex_label = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
-    rel_label = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
-    print $2 "\t" $7 "\t" $8 "\t" sex_label "\t" rel_label
+  awk 'BEGIN {
+    sp["ACB"]="AFR"; sp["ASW"]="AFR"; sp["ESN"]="AFR"; sp["GWD"]="AFR"
+    sp["LWK"]="AFR"; sp["MSL"]="AFR"; sp["YRI"]="AFR"
+    sp["CLM"]="AMR"; sp["MXL"]="AMR"; sp["PEL"]="AMR"; sp["PUR"]="AMR"
+    sp["CDX"]="EAS"; sp["CHB"]="EAS"; sp["CHS"]="EAS"; sp["JPT"]="EAS"; sp["KHV"]="EAS"
+    sp["CEU"]="EUR"; sp["FIN"]="EUR"; sp["GBR"]="EUR"; sp["IBS"]="EUR"; sp["TSI"]="EUR"
+    sp["BEB"]="SAS"; sp["GIH"]="SAS"; sp["ITU"]="SAS"; sp["PJL"]="SAS"; sp["STU"]="SAS"
+  }
+  {
+    sex_label  = ($5 == 1) ? "M" : ($5 == 2) ? "F" : "NA"
+    rel_label  = (($3 == "0" || $3 == "") && ($4 == "0" || $4 == "")) ? "unrelated" : "related"
+    superpop   = ($7 in sp) ? sp[$7] : "NA"
+    print $2 "\t" $7 "\t" superpop "\t" sex_label "\t" $8 "\t" rel_label
   }' OFS='\t' "${PANEL_FILE}" > "${PANEL_TSV}"
 
   # Join QC table with panel on SAMPLE_ID (column 1)
   MERGED_TSV="${QC_OUTPUT}/.merged.tmp"
   # Build merged header: current QC columns + panel columns
   CURRENT_HEADER="$(head -1 "${OUT_TSV}")"
-  echo -e "${CURRENT_HEADER}\tPOPULATION\tSUPERPOPULATION\tREPORTED_SEX\tRELATEDNESS" \
+  echo -e "${CURRENT_HEADER}\tPOPULATION\tSUPERPOPULATION\tREPORTED_SEX\tFAMILY_ROLE\tRELATEDNESS" \
     > "${MERGED_TSV}"
 
   # Use awk join: load panel into associative array, then annotate QC rows
   awk -F'\t' 'BEGIN { OFS="\t" }
     NR == FNR {
-      pop[$1] = $2; super[$1] = $3; sex[$1] = $4; rel[$1] = $5
+      pop[$1] = $2; super[$1] = $3; sex[$1] = $4; role[$1] = $5; rel[$1] = $6
       next
     }
     FNR == 1 { next }   # skip QC header
@@ -270,8 +317,9 @@ else
       p  = (sid in pop)   ? pop[sid]   : "NA"
       s  = (sid in super) ? super[sid] : "NA"
       sx = (sid in sex)   ? sex[sid]   : "NA"
+      ro = (sid in role)  ? role[sid]  : "NA"
       r  = (sid in rel)   ? rel[sid]   : "NA"
-      print $0, p, s, sx, r
+      print $0, p, s, sx, ro, r
     }
   ' "${PANEL_TSV}" "${OUT_TSV}" >> "${MERGED_TSV}"
 

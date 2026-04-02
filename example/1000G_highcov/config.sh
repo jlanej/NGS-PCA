@@ -57,7 +57,9 @@ MIN_MANIFEST_SAMPLES="${MIN_MANIFEST_SAMPLES:-3000}"
 # CRAM URLs in the NYGC indexes point to the ENA FTP (ftp.sra.ebi.ac.uk)
 EXPECTED_FTP_PREFIX="${EXPECTED_FTP_PREFIX:-ftp://ftp.sra.ebi.ac.uk/}"
 
-# IGSR sample panel — population, superpopulation, reported sex (publicly available)
+# IGSR sample panel — population, reported sex, family relationships (publicly available)
+# NOTE: The PED file does NOT contain a superpopulation column; superpopulation
+#       is derived from the population code in 03_collect_qc.sh.
 PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped"
 PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 

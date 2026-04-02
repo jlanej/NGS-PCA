@@ -90,7 +90,8 @@ Source used by this pipeline: `ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technica
 ### 2.3 IGSR Sample Panel (Population Metadata)
 
 International Genome Sample Resource (IGSR). Sample panel with population assignment,
-superpopulation (AFR/AMR/EAS/EUR/SAS), and reported sex.
+reported sex, and family relationships (PED format).  Superpopulation
+(AFR/AMR/EAS/EUR/SAS) is derived from the population code by `03_collect_qc.sh`.
 <https://www.internationalgenome.org/>
 Download: `ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20200731.ALL.ped`
 Download FAQ: <https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/>
