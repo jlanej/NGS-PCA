@@ -72,6 +72,31 @@ bash 03_collect_qc.sh
 
 ---
 
+## Pre-computed example results
+
+The `output/` directory in this repository contains the full results of running the pipeline on all 3,202 samples, committed here so you can explore the outputs without re-running the pipeline.
+
+> **Note:** The bin-loadings file (`svd.loadings.txt`) is not committed because it is very large (~1 GB). All other output files are included.
+
+### `output/ngspca_output/`
+
+| File | Rows | Description |
+|---|---|---|
+| `svd.pcs.txt` | 3,203 (1 header + 3,202 samples) | Sample-by-PC matrix: 200 principal components for each of the 3,202 samples |
+| `svd.singularvalues.txt` | 201 (1 header + 200 PCs) | Singular values for each of the 200 computed PCs (proxy for variance explained) |
+| `svd.bins.txt` | 142,070 | Genomic bins (mosdepth regions) retained after filtering, in the row order used by the loadings matrix |
+| `svd.samples.txt` | 3,202 | Sample identifiers in the row order of `svd.pcs.txt` |
+
+> **ID format note:** Sample IDs in `svd.pcs.txt` / `svd.samples.txt` include a `.by1000.` suffix (e.g., `HG00096.by1000.`), while `sample_qc.tsv` below uses bare IDs (e.g., `HG00096`). To join QC ↔ PCA outputs, strip the suffix from the PCA sample IDs (for example, remove a trailing `.by1000.` substring before merging).
+### `output/qc_output/`
+
+| File | Rows | Description |
+|---|---|---|
+| `sample_qc.tsv` | 3,203 (1 header + 3,202 samples) | Per-sample QC table with 28 columns: mosdepth summary stats, coverage dispersion, HQ autosomal coverage, mtDNA CN, population/sex panel metadata, and sequencing batch annotations. See [QC table columns](#output-table-columns) below. |
+| `mosdepth_coverage_summary.tsv` | 3,203 (1 header + 3,202 samples) | Per-sample autosomal coverage statistics computed by `03a_mosdepth_coverage_summary.sh`: mean, median, SD, MAD, and IQR for all autosomal bins and for high-quality (non-excluded) bins only |
+
+---
+
 ## Detailed walkthrough
 
 ### Step 0: Setup
