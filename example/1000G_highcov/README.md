@@ -87,6 +87,7 @@ The `output/` directory in this repository contains the full results of running 
 | `svd.bins.txt` | 142,070 | Genomic bins (mosdepth regions) retained after filtering, in the row order used by the loadings matrix |
 | `svd.samples.txt` | 3,202 | Sample identifiers in the row order of `svd.pcs.txt` |
 
+> **ID format note:** Sample IDs in `svd.pcs.txt` / `svd.samples.txt` include a `.by1000.` suffix (e.g., `HG00096.by1000.`), while `sample_qc.tsv` below uses bare IDs (e.g., `HG00096`). To join QC ↔ PCA outputs, strip the suffix from the PCA sample IDs (for example, remove a trailing `.by1000.` substring before merging).
 ### `output/qc_output/`
 
 | File | Rows | Description |
