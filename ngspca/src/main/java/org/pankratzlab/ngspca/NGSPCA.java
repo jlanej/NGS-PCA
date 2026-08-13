@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.Options;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
@@ -84,11 +85,30 @@ public class NGSPCA {
       }
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
-      log.info("Loading existing serialized file " + tmpNormDm);
-      dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
+      dm = readCachedMatrix(tmpNormDm, log);
     }
     computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
 
+  }
+
+  /**
+   * A serialized matrix that cannot be read back is what an interrupted run leaves behind: the file
+   * exists, so the next run reuses it rather than rebuilding it, and the null it comes back as
+   * would otherwise surface later as something unrelated to the real problem
+   *
+   * @param file the serialized matrix to read
+   * @param log
+   * @return the matrix it holds
+   */
+  private static BlockRealMatrix readCachedMatrix(String file, Logger log) {
+    log.info("Loading existing serialized file " + file);
+    BlockRealMatrix dm = (BlockRealMatrix) FileOps.readSerial(file, log);
+    if (dm == null) {
+      throw new IllegalStateException("Unable to read " + file
+                                      + " - an interrupted run can leave it incomplete; re-run with --"
+                                      + CmdLine.OVERWRITE_ARG + " to rebuild it");
+    }
+    return dm;
   }
 
   /**
@@ -183,8 +203,7 @@ public class NGSPCA {
     } else {
       System.out.print("Loading");
       System.err.print("Loading");
-      log.info("Loading existing serialized file " + tmpNormDm);
-      dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
+      dm = readCachedMatrix(tmpNormDm, log);
       recoverMedians(medianDm, tmpRawDm, samples, regions.size(), log);
     }
     //    String inputMatrix = Paths.get(outputDir, "svd.norm.input.txt").toString();
@@ -269,9 +288,15 @@ public class NGSPCA {
 
   public static void main(String[] args) {
     Logger log = Logger.getLogger(NGSPCA.class.getName());
-    CommandLine cmd = CmdLine.generateCommandLine(log, CmdLine.generateOptions(), args);
-    if (cmd == null || cmd.hasOption(CmdLine.HELP)) {
-      CmdLine.printHelp(log, CmdLine.generateOptions());
+    Options options = CmdLine.generateOptions();
+    if (CmdLine.isHelpRequested(args)) {
+      // asking for the usage message is not a failure
+      CmdLine.printHelp(log, options);
+      return;
+    }
+    CommandLine cmd = CmdLine.generateCommandLine(log, options, args);
+    if (cmd == null) {
+      CmdLine.printHelp(log, options);
       System.exit(1);
     }
 
@@ -314,7 +339,7 @@ public class NGSPCA {
     } catch (Exception e) {
       log.log(Level.SEVERE, "an exception was thrown", e);
       log.severe("An exception occurred while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
-      CmdLine.printHelp(log, CmdLine.generateOptions());
+      CmdLine.printHelp(log, options);
       // a run that produced no results must not report success - a workflow engine or job array
       // has nothing else to go on
       System.exit(1);

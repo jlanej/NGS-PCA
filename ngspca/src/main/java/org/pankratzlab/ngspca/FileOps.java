@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,15 +64,19 @@ public class FileOps {
                     .collect(Collectors.toList());
   }
 
-  static boolean writeSerial(Object o, String filename, Logger log) {
+  /**
+   * @throws UncheckedIOException if the object could not be written - these files are read back by
+   *           a later run, so continuing past a failed or partial write hides the problem until it
+   *           surfaces as something else
+   */
+  static void writeSerial(Object o, String filename, Logger log) {
 
     try (ObjectOutputStream oos = new ObjectOutputStream(new GZIPOutputStream(new FileOutputStream(filename)))) {
       oos.writeObject(o);
       oos.flush();
-      return true;
-    } catch (Exception e) {
-      log.log(Level.SEVERE, "an exception was thrown", e);
-      return false;
+    } catch (IOException e) {
+      log.log(Level.SEVERE, "an exception was thrown while writing to " + filename, e);
+      throw new UncheckedIOException("unable to write " + filename, e);
     }
   }
 
@@ -88,17 +93,19 @@ public class FileOps {
 
   }
 
+  /**
+   * @throws UncheckedIOException if the file could not be written
+   */
   static void writeToText(List<String> list, String filename, Logger log) {
 
-    try {
-      FileWriter writer = new FileWriter(filename);
+    try (FileWriter writer = new FileWriter(filename)) {
       for (String str : list) {
         writer.write(str + System.lineSeparator());
 
       }
-      writer.close();
     } catch (IOException e1) {
       log.log(Level.SEVERE, "an exception was thrown while writing to " + filename, e1);
+      throw new UncheckedIOException("unable to write " + filename, e1);
     }
 
   }

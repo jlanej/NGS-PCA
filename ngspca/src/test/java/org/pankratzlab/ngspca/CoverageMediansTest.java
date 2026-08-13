@@ -49,6 +49,22 @@ public class CoverageMediansTest extends TestCase {
   }
 
   /**
+   * The table is one of the run's outputs, so failing to write it is a failed run rather than a
+   * missing file for a reader to trip over
+   */
+  public void testFailsLoudlyWhenItCannotBeWritten() throws Exception {
+    File dir = java.nio.file.Files.createTempDirectory("ngspca.unwritable").toFile();
+    dir.deleteOnExit();
+    try {
+      CoverageMedians.write(dir.getAbsolutePath(), CoverageMedians.AUTOSOMAL_COLUMN,
+                            Arrays.asList("sampleA"), new double[] {1.0}, 10, LOG);
+      fail("expected an UncheckedIOException when the file cannot be written");
+    } catch (java.io.UncheckedIOException expected) {
+      // expected
+    }
+  }
+
+  /**
    * Sample names and medians are matched by position, so a length mismatch is a bug rather than
    * something to write out and let a reader discover
    */

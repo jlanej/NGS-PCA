@@ -159,8 +159,26 @@ class CmdLine {
   }
 
   /**
+   * {@link #INPUT_ARG} and {@link #OUTPUT_DIR_ARG} are required, so a command line that asks only
+   * for the usage message does not parse - the request has to be spotted before parsing rather than
+   * read off the parsed result
+   *
+   * @param commandLineArguments arguments provided to the cmd line
+   * @return whether the usage message was asked for
+   */
+  static boolean isHelpRequested(final String[] commandLineArguments) {
+    for (String argument : commandLineArguments) {
+      if ("-h".equals(argument) || ("-" + HELP).equals(argument)
+          || ("--" + HELP).equals(argument)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Parse cmd line options
-   * 
+   *
    * @param log {@link Logger}
    * @param options {@link Options} to select from
    * @param commandLineArguments arguments provided to the cmd line

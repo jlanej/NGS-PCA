@@ -3,6 +3,7 @@ package org.pankratzlab.ngspca;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -78,7 +79,7 @@ class CoverageMedians {
       }
     } catch (FileNotFoundException e) {
       log.log(Level.SEVERE, "unable to write to file " + file, e);
-      return;
+      throw new UncheckedIOException("unable to write " + file, e);
     }
     log.info("Wrote " + samples.size() + " per-sample medians, computed over " + numBins
              + " bins, to " + file);

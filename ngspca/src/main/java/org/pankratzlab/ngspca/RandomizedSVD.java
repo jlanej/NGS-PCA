@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.util.List;
 import java.util.StringJoiner;
@@ -232,6 +233,7 @@ public class RandomizedSVD {
     } catch (FileNotFoundException e) {
 
       log.log(Level.SEVERE, "unable to write to file " + file, e);
+      throw new UncheckedIOException("unable to write " + file, e);
 
     }
   }
@@ -269,6 +271,7 @@ public class RandomizedSVD {
                                   false);
     } catch (IOException e) {
       log.log(Level.SEVERE, "unable to write to file " + file, e);
+      throw new UncheckedIOException("unable to write " + file, e);
     }
 
   }
