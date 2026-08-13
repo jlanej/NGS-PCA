@@ -28,7 +28,8 @@ public class NGSPCA {
 
   private static void runInputMatrix(String inputMatrixFile, String outputDir, int numPcs,
                                      int niters, int numOversamples, int randomSeed,
-                                     boolean overwrite, boolean normMatrix, DISTRIBUTION d,
+                                     boolean overwrite, boolean normMatrix, String sampleSuffix,
+                                     DISTRIBUTION d,
                                      Logger log) throws InterruptedException, ExecutionException,
                                                  IOException {
     new File(outputDir).mkdirs();
@@ -41,9 +42,10 @@ public class NGSPCA {
 
     log.info("Determining number of samples in " + inputMatrixFile);
 
-    List<String> samples = FileOps.getFileHeader(inputMatrixFile, gz, delim, log);
-    samples.remove(0);
-    log.info("Found a total of " + samples.size() + " samples in " + inputMatrixFile);
+    List<String> header = FileOps.getFileHeader(inputMatrixFile, gz, delim, log);
+    header.remove(0);
+    log.info("Found a total of " + header.size() + " samples in " + inputMatrixFile);
+    List<String> samples = SampleNames.resolve(header, sampleSuffix, log);
 
     log.info("Determining number of regions in " + inputMatrixFile);
     List<String> regions = FileOps.getColumn(inputMatrixFile, gz, delim, 0, log);
@@ -108,7 +110,8 @@ public class NGSPCA {
   private static void runMosdepth(String input, String outputDir, String bedExclude,
                                   REGION_STRATEGY regionStrategy, int numPcs, int niters,
                                   int numOversamples, int sampleAt, int randomSeed,
-                                  boolean overwrite, int threads, DISTRIBUTION d,
+                                  boolean overwrite, int threads, String sampleSuffix,
+                                  DISTRIBUTION d,
                                   Logger log) throws InterruptedException, ExecutionException,
                                               IOException {
     new File(outputDir).mkdirs();
@@ -139,10 +142,11 @@ public class NGSPCA {
       log.info("Detected " + mosDepthResultFiles.size() + " mosdepth input files in " + input);
     }
     // parse sample names from files
-    List<String> samples = mosDepthResultFiles.stream()
-                                              .map(f -> FileOps.stripDirectoryAndExtension(f,
-                                                                                           MosdepthUtils.MOSDEPTH_BED_EXT))
-                                              .collect(Collectors.toList());
+    List<String> samples = SampleNames.resolve(mosDepthResultFiles.stream()
+                                                                  .map(f -> FileOps.stripDirectoryAndExtension(f,
+                                                                                                               MosdepthUtils.MOSDEPTH_BED_EXT))
+                                                                  .collect(Collectors.toList()),
+                                               sampleSuffix, log);
 
     // load ucsc regions to use
 
@@ -296,14 +300,16 @@ public class NGSPCA {
                                                                CmdLine.DEFAULT_DISTRIBUTION.toString()));
       String bedExclude = cmd.getOptionValue(CmdLine.EXCLUDE_BED_FILE,
                                              CmdLine.DEFAULT_EXCLUDE_BED_FILE);
+      String sampleSuffix = cmd.getOptionValue(CmdLine.SAMPLE_SUFFIX_ARG,
+                                               CmdLine.DEFAULT_SAMPLE_SUFFIX);
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
         runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, log);
+                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), sampleSuffix, d, log);
       } else {
         runMosdepth(input, outputDir, bedExclude, REGION_STRATEGY.AUTOSOMAL, numPcs, niters,
                     numOversamples, sampleAt, randomSeed, cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                    threads, d, log);
+                    threads, sampleSuffix, d, log);
       }
     } catch (Exception e) {
       log.log(Level.SEVERE, "an exception was thrown", e);

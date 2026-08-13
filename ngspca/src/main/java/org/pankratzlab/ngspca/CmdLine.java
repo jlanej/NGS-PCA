@@ -25,6 +25,7 @@ class CmdLine {
   static final String NUM_COMPONENTS_ARG = "numPC";
   static final String NUM_THREADS_ARG = "threads";
   static final String NUM_SAMPLE_ARG = "sampleEvery";
+  static final String SAMPLE_SUFFIX_ARG = "sampleSuffix";
   static final String EXCLUDE_BED_FILE = "bedExclude";
   static final String N_ITERS = "iters";
   static final String OVERSAMPLE = "oversample";
@@ -35,6 +36,7 @@ class CmdLine {
   static final int DEFAULT_PCS = 20;
   static final int DEFAULT_SAMPLE = 1;
   static final String DEFAULT_EXCLUDE_BED_FILE = null;
+  static final String DEFAULT_SAMPLE_SUFFIX = null;
   static final DISTRIBUTION DEFAULT_DISTRIBUTION = DISTRIBUTION.UNIFORM;
 
   static final int DEFAULT_THREADS = 4;
@@ -87,6 +89,17 @@ class CmdLine {
                                            + DEFAULT_SAMPLE + " (use every bin)")
                                      .required(false).build();
 
+    final Option sampleSuffix = Option.builder(SAMPLE_SUFFIX_ARG).hasArg(true)
+                                      .longOpt(SAMPLE_SUFFIX_ARG).hasArg()
+                                      .desc("Optional: remove this literal suffix from every sample name."
+                                            + " Sample names are otherwise the mosdepth file name with the "
+                                            + MosdepthUtils.MOSDEPTH_BED_EXT
+                                            + " extension removed, which leaves a trailing '.' - so --"
+                                            + SAMPLE_SUFFIX_ARG
+                                            + " .by1000. names sample.cram.by1000.regions.bed.gz as sample.cram."
+                                            + " Applies to every output file that names samples, so they stay consistent with each other")
+                                      .required(false).build();
+
     final Option bedExcludes = Option.builder("b").hasArg(true).required().longOpt(EXCLUDE_BED_FILE)
                                      .hasArg()
                                      .desc("Optional: Provide a file to exclude specific regions from PCA input, prior to sampling with "
@@ -134,6 +147,7 @@ class CmdLine {
     options.addOption(numComponents);
     options.addOption(numThreads);
     options.addOption(sampleEvery);
+    options.addOption(sampleSuffix);
     options.addOption(bedExcludes);
     options.addOption(niter);
     options.addOption(oversamples);

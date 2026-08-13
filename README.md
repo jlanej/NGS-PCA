@@ -140,6 +140,7 @@ java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
 | `-threads` | Threads for loading mosdepth files. | 4 |
 | `-bedExclude` | BED file of regions to exclude before PCA. | — |
 | `-sampleEvery` | Keep every *n*-th bin (0 or 1 = use all bins). | 1 |
+| `-sampleSuffix` | Literal suffix to remove from every sample name, e.g. `.by1000.` (see [Sample identifiers](#sample-identifiers)). | — |
 | `-overwrite` | Flag: overwrite existing temporary (cached) files and recompute each step. | false |
 
 ### Exclusion BED files
@@ -185,11 +186,6 @@ anything overlapping `-bedExclude`, minus anything dropped by `-sampleEvery`.
 visible in the file itself. The value is **not** floored — a sample reported at or
 near zero is an empty or failed input, and is logged as a warning.
 
-Sample identifiers are the same ones in `svd.pcs.txt` and `svd.samples.txt`
-(the mosdepth file name with the `regions.bed.gz` suffix removed), so the two
-tables join to each other. If the tool consuming them names its samples
-differently, the same reconciliation applies to both files.
-
 The file is written as soon as normalization finishes, before the SVD, so it
 survives a run that fails or is killed later. A re-run that reuses a cached
 `tmp.mat.ser.gz` recomputes it from `tmp.raw.ser.gz` rather than re-reading the
@@ -199,6 +195,33 @@ With `-matrix -normalizeMatrix` the same medians are written to
 `matrix.median.txt` under the column name `MEDIAN`: the rows of a supplied matrix
 were not chosen here, so NGS-PCA cannot assert they are autosomal and
 exclusion-filtered.
+
+### Sample identifiers
+
+Every output that names samples uses the same identifiers — `svd.pcs.txt`,
+`svd.samples.txt` and the median table all agree — so they join to each other.
+
+A sample's name is its mosdepth file name with the `regions.bed.gz` extension
+removed. That extension carries no leading dot, so the name keeps a trailing one,
+along with whatever the naming convention put in front of it:
+
+```
+HG00156.<...>.cram.by1000.regions.bed.gz  ->  HG00156.<...>.cram.by1000.
+```
+
+A tool that built its own depth matrix from the same files will usually have
+named that sample `HG00156.<...>.cram`, and matching identifiers has to be exact.
+Rather than rewriting the tables afterwards, `-sampleSuffix .by1000.` removes the
+suffix once, everywhere:
+
+```
+-sampleSuffix .by1000.  ->  HG00156.<...>.cram
+```
+
+It is a literal suffix, not a pattern, and only removed where it actually trails.
+A suffix that matches no sample name is treated as a typo, and one that makes two
+samples collide is refused, because both would otherwise surface downstream as
+samples silently dropped from a join.
 
 ## 1000 Genomes 30x high-coverage example
 
