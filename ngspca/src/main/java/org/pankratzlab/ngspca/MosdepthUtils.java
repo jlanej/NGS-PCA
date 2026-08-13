@@ -78,7 +78,7 @@ class MosdepthUtils {
    * @param ucscRegions {@link Set} of regions to process
    * @param threads number of threads to use when loading
    * @param log
-   * @return
+   * @return the normalized matrix and the per-sample medians it was normalized against
    * @throws InterruptedException
    * @throws ExecutionException
    */

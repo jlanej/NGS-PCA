@@ -51,8 +51,10 @@ class SampleNames {
         // the flag was asked for and did nothing, which downstream looks the same as not passing it
         throw new IllegalArgumentException("No sample name ends with \"" + suffix + "\", so --"
                                            + CmdLine.SAMPLE_SUFFIX_ARG
-                                           + " had no effect - sample names look like \""
-                                           + names.get(0) + "\"");
+                                           + " had no effect - "
+                                           + (names.isEmpty() ? "no samples were found"
+                                                              : "sample names look like \""
+                                                                + names.get(0) + "\""));
       }
       log.info("Removed the suffix \"" + suffix + "\" from " + stripped + " of " + names.size()
                + " sample names");

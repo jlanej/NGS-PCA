@@ -1,7 +1,10 @@
 package org.pankratzlab.ngspca;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.util.List;
@@ -48,6 +51,33 @@ class CoverageMedians {
 
   private CoverageMedians() {
 
+  }
+
+  /**
+   * A median table is only reusable if it still names the samples this run is naming, since it has
+   * to join to the PC table written beside it. {@link CmdLine#SAMPLE_SUFFIX_ARG} changes those
+   * names without changing anything the medians are computed from, so "the file is already there"
+   * is not enough on its own.
+   *
+   * @param file an existing median table
+   * @param samples sample identifiers, in matrix column order
+   * @param log
+   * @return whether the table names exactly these samples, in this order
+   */
+  static boolean namesSamples(String file, List<String> samples, Logger log) {
+    try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+      reader.readLine();
+      for (String sample : samples) {
+        String line = reader.readLine();
+        if (line == null || !sample.equals(line.split("\t", 2)[0])) {
+          return false;
+        }
+      }
+      return reader.readLine() == null;
+    } catch (IOException e) {
+      log.log(Level.WARNING, "unable to read " + file, e);
+      return false;
+    }
   }
 
   /**

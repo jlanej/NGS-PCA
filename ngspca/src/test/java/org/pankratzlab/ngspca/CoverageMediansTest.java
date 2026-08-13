@@ -1,6 +1,7 @@
 package org.pankratzlab.ngspca;
 
 import java.io.File;
+import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.Arrays;
@@ -53,15 +54,44 @@ public class CoverageMediansTest extends TestCase {
    * missing file for a reader to trip over
    */
   public void testFailsLoudlyWhenItCannotBeWritten() throws Exception {
-    File dir = java.nio.file.Files.createTempDirectory("ngspca.unwritable").toFile();
+    File dir = Files.createTempDirectory("ngspca.unwritable").toFile();
     dir.deleteOnExit();
     try {
       CoverageMedians.write(dir.getAbsolutePath(), CoverageMedians.AUTOSOMAL_COLUMN,
                             Arrays.asList("sampleA"), new double[] {1.0}, 10, LOG);
       fail("expected an UncheckedIOException when the file cannot be written");
-    } catch (java.io.UncheckedIOException expected) {
+    } catch (UncheckedIOException expected) {
       // expected
     }
+  }
+
+  /**
+   * A table left by an earlier run is only reusable if it still names the same samples - --{@link
+   * CmdLine#SAMPLE_SUFFIX_ARG} renames them without changing anything the medians came from
+   */
+  public void testDetectsATableThatNamesOtherSamples() throws Exception {
+    File out = File.createTempFile("ngspca.medians", ".txt");
+    out.deleteOnExit();
+    List<String> samples = Arrays.asList("sampleA.by1000.", "sampleB.by1000.");
+    CoverageMedians.write(out.getAbsolutePath(), CoverageMedians.AUTOSOMAL_COLUMN, samples,
+                          new double[] {30.5, 12.0}, 10, LOG);
+
+    assertTrue(CoverageMedians.namesSamples(out.getAbsolutePath(), samples, LOG));
+    // renamed by --sampleSuffix
+    assertFalse(CoverageMedians.namesSamples(out.getAbsolutePath(),
+                                             Arrays.asList("sampleA", "sampleB"), LOG));
+    // a sample added, and one removed
+    assertFalse(CoverageMedians.namesSamples(out.getAbsolutePath(),
+                                             Arrays.asList("sampleA.by1000.", "sampleB.by1000.",
+                                                           "sampleC.by1000."),
+                                             LOG));
+    assertFalse(CoverageMedians.namesSamples(out.getAbsolutePath(),
+                                             Arrays.asList("sampleA.by1000."), LOG));
+  }
+
+  public void testATableThatIsNotThereNamesNobody() {
+    assertFalse(CoverageMedians.namesSamples("/no/such/ngspca/medians.txt",
+                                             Arrays.asList("sampleA"), LOG));
   }
 
   /**
