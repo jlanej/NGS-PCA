@@ -15,6 +15,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.math3.linear.BlockRealMatrix;
+import org.apache.commons.math3.linear.RealMatrix;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.MosdepthUtils.REGION_STRATEGY;
 import org.pankratzlab.ngspca.RandomizedSVD.DISTRIBUTION;
@@ -69,7 +70,15 @@ public class NGSPCA {
       }
       if (normMatrix) {
         log.info("Normalizing input matrix");
-        NormalizationOperations.foldChangeAndCenterRows(dm, log);
+        double[] medians = NormalizationOperations.foldChangeAndCenterRows(dm, log);
+        String medianFile = Paths.get(outputDir, CoverageMedians.MATRIX_FILE).toString();
+        log.info("The rows of " + inputMatrixFile
+                 + " were supplied rather than selected here, so the median column in " + medianFile
+                 + " is reported as " + CoverageMedians.MATRIX_COLUMN + " rather than "
+                 + CoverageMedians.AUTOSOMAL_COLUMN + " - rename it only if those rows really are"
+                 + " autosomal and exclusion-filtered");
+        CoverageMedians.write(medianFile, CoverageMedians.MATRIX_COLUMN, samples, medians,
+                              regions.size(), log);
       }
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
@@ -153,18 +162,26 @@ public class NGSPCA {
     String tmpRawDm = Paths.get(outputDir, "tmp.raw.ser.gz").toString();
     // Store the temporary input matrix
     String tmpNormDm = Paths.get(outputDir, "tmp.mat.ser.gz").toString();
+    // Report the medians normalization computed, for tools that normalize against them too
+    String medianDm = Paths.get(outputDir, CoverageMedians.AUTOSOMAL_FILE).toString();
 
     // populate input matrix and normalize
     BlockRealMatrix dm;
     if (!FileOps.fileExists(tmpNormDm) || overwrite) {
-      dm = MosdepthUtils.processFiles(mosDepthResultFiles, new HashSet<String>(regions), tmpRawDm,
-                                      threads, log);
+      MosdepthUtils.NormalizedResult normalized = MosdepthUtils.processFiles(mosDepthResultFiles,
+                                                                             new HashSet<String>(regions),
+                                                                             tmpRawDm, threads,
+                                                                             log);
+      dm = normalized.matrix;
       FileOps.writeSerial(dm, tmpNormDm, log);
+      CoverageMedians.write(medianDm, CoverageMedians.AUTOSOMAL_COLUMN, samples,
+                            normalized.columnMedians, regions.size(), log);
     } else {
       System.out.print("Loading");
       System.err.print("Loading");
       log.info("Loading existing serialized file " + tmpNormDm);
       dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
+      recoverMedians(medianDm, tmpRawDm, samples, regions.size(), log);
     }
     //    String inputMatrix = Paths.get(outputDir, "svd.norm.input.txt").toString();
     //    log.info("Writing to " + inputMatrix);
@@ -173,6 +190,48 @@ public class NGSPCA {
     //                             regions.toArray(new String[regions.size()]), false, log);
 
     computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
+  }
+
+  /**
+   * A normalized matrix no longer holds the medians it was normalized against, so a run that reuses
+   * a serialized one recovers them from the raw matrix stored beside it. That is a single pass over
+   * data already on disk, rather than a re-read of every mosdepth file.
+   *
+   * @param medianFile the medians are written here, if they are not there already
+   * @param tmpRawFile the serialized raw (pre-normalization) matrix
+   * @param samples sample identifiers, in matrix column order
+   * @param numBins number of rows the medians are computed over
+   * @param log
+   */
+  private static void recoverMedians(String medianFile, String tmpRawFile, List<String> samples,
+                                     int numBins, Logger log) {
+    if (FileOps.fileExists(medianFile)) {
+      log.info("Using existing per-sample medians in " + medianFile);
+      return;
+    }
+    if (!FileOps.fileExists(tmpRawFile)) {
+      log.warning(medianFile + " does not exist, and " + tmpRawFile
+                  + " is not available to compute it from - re-run with --" + CmdLine.OVERWRITE_ARG
+                  + " to regenerate both");
+      return;
+    }
+    log.info("Computing per-sample medians from " + tmpRawFile);
+    RealMatrix raw = (RealMatrix) FileOps.readSerial(tmpRawFile, log);
+    if (raw == null) {
+      log.warning("Unable to read " + tmpRawFile + ", so " + medianFile + " was not written");
+      return;
+    }
+    if (raw.getColumnDimension() != samples.size()) {
+      // the serialized matrices are from a different run, which means the normalized one loaded
+      // above does not describe these samples either
+      log.warning(tmpRawFile + " holds " + raw.getColumnDimension() + " samples but "
+                  + samples.size()
+                  + " were found in the input - the serialized matrices are from a different run, so "
+                  + medianFile + " was not written; re-run with --" + CmdLine.OVERWRITE_ARG);
+      return;
+    }
+    CoverageMedians.write(medianFile, CoverageMedians.AUTOSOMAL_COLUMN, samples,
+                          NormalizationOperations.columnMedians(raw), numBins, log);
   }
 
   static void computeSVD(String outputDir, int numPcs, int niters, int numOversamples,

@@ -13,7 +13,7 @@ public class NormalizationOperations {
   /**
    * 0.005 is half the lowest value given by mosdepth
    */
-  private static final double MIN_DEPTH = 0.005;
+  static final double MIN_DEPTH = 0.005;
 
   private NormalizationOperations() {
 
@@ -21,36 +21,40 @@ public class NormalizationOperations {
 
   /**
    * compute fold-change (by column) , and then center the matrix so each row has median of 0;
-   * 
+   *
    * @param m an {@link RealMatrix} that has been FC-ed by column and centered by row
+   * @return the median of each column, as computed from the input values and prior to the
+   *         {@link #MIN_DEPTH} floor - this is each sample's median depth across the rows of the
+   *         matrix, and the value the fold-change was taken against
    */
-  static void foldChangeAndCenterRows(RealMatrix dm, Logger log) {
+  static double[] foldChangeAndCenterRows(RealMatrix dm, Logger log) {
     // compute fold change
-    computeFoldChangeByColumn(dm, log);
+    double[] medians = computeFoldChangeByColumn(dm, log);
     // center rows to median of 0
     centerRowsToMedian(dm);
+    return medians;
   }
 
   /**
    * Set the values of the matrix to the log 2 fold change (computed by column)
-   * 
+   *
    * @param dm the {@link RealMatrix} that will be converted
+   * @return the un-floored median of each column
    */
-  private static void computeFoldChangeByColumn(RealMatrix dm, Logger log) {
-    double[] medians = new double[dm.getColumnDimension()];
+  private static double[] computeFoldChangeByColumn(RealMatrix dm, Logger log) {
+    double[] medians = columnMedians(dm);
+
+    // the value actually divided by - a sample with no coverage would otherwise divide by zero
+    double[] denominators = new double[medians.length];
+    for (int column = 0; column < medians.length; column++) {
+      denominators[column] = Math.max(medians[column], MIN_DEPTH);
+    }
 
     // convert columns to log2 fold-change from median
-    for (int column = 0; column < dm.getColumnDimension(); column++) {
-      double[] tmp = new double[dm.getRowDimension()];
-      for (int row = 0; row < dm.getRowDimension(); row++) {
-        tmp[row] = dm.getEntry(row, column);
-      }
-      medians[column] = Math.max(median(tmp), MIN_DEPTH);
-    }
     for (int row = 0; row < dm.getRowDimension(); row++) {
       for (int column = 0; column < dm.getColumnDimension(); column++) {
         double entry = dm.getEntry(row, column);
-        double standard = log2(Math.max(entry, MIN_DEPTH) / medians[column]);
+        double standard = log2(Math.max(entry, MIN_DEPTH) / denominators[column]);
         if (Double.isNaN(standard)) {
           throw new IllegalArgumentException("Invalid sample normalized value ("
                                              + Double.toString(Double.NaN) + ") detected");
@@ -58,6 +62,19 @@ public class NormalizationOperations {
         dm.setEntry(row, column, standard);
       }
     }
+    return medians;
+  }
+
+  /**
+   * @param dm the {@link RealMatrix} to summarize, holding one sample per column
+   * @return the median of each column, un-floored
+   */
+  static double[] columnMedians(RealMatrix dm) {
+    double[] medians = new double[dm.getColumnDimension()];
+    for (int column = 0; column < dm.getColumnDimension(); column++) {
+      medians[column] = median(dm.getColumn(column));
+    }
+    return medians;
   }
 
   private static double median(double[] tmp) {

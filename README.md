@@ -165,6 +165,40 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 | `svd.singularvalues.txt` | Singular values per PC |
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers |
+| `autosomal.median.txt` | Per-sample median depth across the bins used (see below) |
+
+### Per-sample median depth
+
+Normalization divides each sample by its own median depth before taking the log2
+fold change, so that median already exists — `autosomal.median.txt` simply reports
+it rather than making downstream tools re-derive it from the mosdepth files. It
+costs one small table and no additional pass over the data.
+
+```
+SAMPLE                       AUTO_HQ_median   N_BINS
+HG00156.<...>.cram.by1000.   8.99             15593
+```
+
+`AUTO_HQ_median` is the median over exactly the bins PCA used: autosomal, minus
+anything overlapping `-bedExclude`, minus anything dropped by `-sampleEvery`.
+`N_BINS` records how many that was, so a run that sampled or over-excluded is
+visible in the file itself. The value is **not** floored — a sample reported at or
+near zero is an empty or failed input, and is logged as a warning.
+
+Sample identifiers are the same ones in `svd.pcs.txt` and `svd.samples.txt`
+(the mosdepth file name with the `regions.bed.gz` suffix removed), so the two
+tables join to each other. If the tool consuming them names its samples
+differently, the same reconciliation applies to both files.
+
+The file is written as soon as normalization finishes, before the SVD, so it
+survives a run that fails or is killed later. A re-run that reuses a cached
+`tmp.mat.ser.gz` recomputes it from `tmp.raw.ser.gz` rather than re-reading the
+mosdepth files, so an existing output directory can be topped up cheaply.
+
+With `-matrix -normalizeMatrix` the same medians are written to
+`matrix.median.txt` under the column name `MEDIAN`: the rows of a supplied matrix
+were not chosen here, so NGS-PCA cannot assert they are autosomal and
+exclusion-filtered.
 
 ## 1000 Genomes 30x high-coverage example
 
