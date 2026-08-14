@@ -12,7 +12,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
-import org.ejml.data.DenseMatrix64F;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.BedUtils.BedRegionResult;
 import htsjdk.tribble.bed.BEDFeature;
@@ -98,7 +97,7 @@ class MosdepthUtils {
    * @param ucscRegions only these regions will be used
    * @param threads number of threads to use when loading
    * @param log
-   * @return normalized {@link DenseMatrix64F} holding all input files, and the per-sample medians
+   * @return normalized {@link BlockRealMatrix} holding all input files, and the per-sample medians
    *         it was normalized against
    * @throws InterruptedException
    * @throws ExecutionException

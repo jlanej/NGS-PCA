@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.logging.Level;
@@ -198,9 +199,22 @@ public class RandomizedSVD {
     //
     RealMatrix v = rsvd[2];
     v = v.transpose();
-    List<String> pcNames = SVD.getNumberedColumnHeader("PC", v.getRowDimension());
+    List<String> pcNames = getNumberedColumnHeader("PC", v.getRowDimension());
 
     dumpMatrix(file, v, "SAMPLE", pcNames, originalColNames, true, log);
+  }
+
+  /**
+   * @param type name each column carries, e.g. "PC"
+   * @param num how many columns to name
+   * @return the names, numbered from one
+   */
+  private static List<String> getNumberedColumnHeader(String type, int num) {
+    List<String> names = new ArrayList<>();
+    for (int i = 0; i < num; i++) {
+      names.add(type + (i + 1));
+    }
+    return names;
   }
 
   private static void dumpMatrix(String file, RealMatrix m, String rowTitle,
@@ -248,7 +262,7 @@ public class RandomizedSVD {
    */
   void computeAndDumpLoadings(String file, Logger log) {
     RealMatrix loadingData = rsvd[0];
-    List<String> loadingNames = SVD.getNumberedColumnHeader("Loading",
+    List<String> loadingNames = getNumberedColumnHeader("Loading",
                                                             loadingData.getColumnDimension());
     dumpMatrix(file, loadingData, "MARKER", loadingNames, originalRowNames, false, log);
 
