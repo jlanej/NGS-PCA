@@ -8,8 +8,8 @@ import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ForkJoinPool;
 import java.util.StringJoiner;
+import java.util.concurrent.ForkJoinPool;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.io.FileUtils;
@@ -103,9 +103,10 @@ public class RandomizedSVD {
     }
     log.info("Initializing matrices");
 
-    int m = A.getRowDimension();
     int n = A.getColumnDimension();
-    transpose = m < n;
+    // the transpose below leaves this true of A from here on: at least as many rows as columns,
+    // which is what every QR taken of a product of it relies on
+    transpose = A.getRowDimension() < n;
     rsvd[0] = MatrixUtils.createRealMatrix(A.getRowDimension(), numComponents);
     rsvd[1] = MatrixUtils.createRealMatrix(numComponents, 1);
     rsvd[2] = MatrixUtils.createRealMatrix(A.getColumnDimension(), numComponents);

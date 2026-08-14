@@ -1,7 +1,7 @@
 package org.pankratzlab.ngspca;
 
-import java.util.Arrays;
 import java.util.concurrent.ForkJoinPool;
+import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.MatrixUtils;
@@ -99,7 +99,8 @@ class ThinQR {
     for (int k = n - 1; k >= 0; k--) {
       final double[] pivot = columns[k];
       final int from = k;
-      Arrays.fill(q[k], 0.0);
+      // q[k] is still the zeros it was allocated with: step k is the first to write it, since
+      // earlier steps reflect only columns j >= their own k, all of which are above this one
       q[k][k] = 1.0;
       if (pivot[k] != 0) {
         inPool(pool, k, n, j -> reflect(pivot, q[j], from, m));
@@ -112,7 +113,7 @@ class ThinQR {
    * Run {@code action} over [from, to) in the given pool. Submitting the stream is what confines it
    * there; a bare parallel stream would use the common pool and every core on the machine.
    */
-  private static void inPool(ForkJoinPool pool, int from, int to, java.util.function.IntConsumer action) {
+  private static void inPool(ForkJoinPool pool, int from, int to, IntConsumer action) {
     pool.submit(() -> IntStream.range(from, to).parallel().forEach(action)).join();
   }
 
