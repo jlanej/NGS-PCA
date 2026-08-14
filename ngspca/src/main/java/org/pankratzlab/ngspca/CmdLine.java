@@ -97,7 +97,9 @@ class CmdLine {
                                             + " extension removed, which leaves a trailing '.' - so --"
                                             + SAMPLE_SUFFIX_ARG
                                             + " .by1000. names sample.cram.by1000.regions.bed.gz as sample.cram."
-                                            + " Applies to every output file that names samples, so they stay consistent with each other")
+                                            + " Applies to every output file that names samples, so they stay consistent with each other."
+                                            + " Mosdepth input only - the column names of a matrix given with --"
+                                            + MATRIX_INPUT_ARG + " are used as they are")
                                       .required(false).build();
 
     final Option bedExcludes = Option.builder("b").hasArg(true).required().longOpt(EXCLUDE_BED_FILE)

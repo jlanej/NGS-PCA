@@ -201,7 +201,8 @@ HG00156.<...>.cram.by1000.regions.bed.gz  ->  HG00156.<...>.cram.by1000.
 Every output that names samples uses the same identifiers, so `-sampleSuffix`
 lines all of them up at once with whatever built your depth matrix. It removes a
 literal suffix where it trails; one that matches nothing, or that makes two
-samples collide, stops the run.
+samples collide, stops the run. Mosdepth input only — the column names of a
+`-matrix` are used as they are.
 
 ## 1000 Genomes 30x high-coverage example
 

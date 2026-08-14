@@ -28,8 +28,7 @@ public class NGSPCA {
 
   private static void runInputMatrix(String inputMatrixFile, String outputDir, int numPcs,
                                      int niters, int numOversamples, int randomSeed,
-                                     boolean overwrite, boolean normMatrix, String sampleSuffix,
-                                     DISTRIBUTION d,
+                                     boolean overwrite, boolean normMatrix, DISTRIBUTION d,
                                      Logger log) throws InterruptedException, ExecutionException,
                                                  IOException {
     new File(outputDir).mkdirs();
@@ -42,10 +41,11 @@ public class NGSPCA {
 
     log.info("Determining number of samples in " + inputMatrixFile);
 
-    List<String> header = FileOps.getFileHeader(inputMatrixFile, gz, delim, log);
-    header.remove(0);
-    log.info("Found a total of " + header.size() + " samples in " + inputMatrixFile);
-    List<String> samples = SampleNames.resolve(header, sampleSuffix, log);
+    // the column names of a supplied matrix are used as given: whatever produced it named the
+    // samples, and is in a better position than NGS-PCA to have named them correctly
+    List<String> samples = FileOps.getFileHeader(inputMatrixFile, gz, delim, log);
+    samples.remove(0);
+    log.info("Found a total of " + samples.size() + " samples in " + inputMatrixFile);
 
     log.info("Determining number of regions in " + inputMatrixFile);
     List<String> regions = FileOps.getColumn(inputMatrixFile, gz, delim, 0, log);
@@ -281,9 +281,16 @@ public class NGSPCA {
       String sampleSuffix = cmd.getOptionValue(CmdLine.SAMPLE_SUFFIX_ARG,
                                                CmdLine.DEFAULT_SAMPLE_SUFFIX);
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
+        if (sampleSuffix != null) {
+          // it does nothing here, and a flag that quietly does nothing is what the same flag
+          // refuses to be when it matches no mosdepth file name
+          log.warning("--" + CmdLine.SAMPLE_SUFFIX_ARG + " does not apply to --"
+                      + CmdLine.MATRIX_INPUT_ARG
+                      + " input, whose column names are used as they are");
+        }
         runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), sampleSuffix, d, log);
+                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, log);
       } else {
         runMosdepth(input, outputDir, bedExclude, REGION_STRATEGY.AUTOSOMAL, numPcs, niters,
                     numOversamples, sampleAt, randomSeed, cmd.hasOption(CmdLine.OVERWRITE_ARG),
