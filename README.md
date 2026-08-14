@@ -204,6 +204,17 @@ literal suffix where it trails; one that matches nothing, or that makes two
 samples collide, stops the run. Mosdepth input only — the column names of a
 `-matrix` are used as they are.
 
+### Sample order
+
+Sample order is matrix column order, and the randomized SVD multiplies those
+columns as they stand by a random matrix fixed by `-randomSeed` — so order is
+part of the computation, not just labelling. Reordering the same cohort moves the
+PCs within the method's approximation error, not beyond it.
+
+A directory given to `-input` is therefore sorted, so a run reproduces wherever
+the directory happens to live; a file listing paths is used in the order written,
+which is what makes that order yours to fix.
+
 ## 1000 Genomes 30x high-coverage example
 
 A fully reproducible, end-to-end pipeline for computing ~200 PCs from all **3,202** [1000 Genomes 30x high-coverage WGS samples](https://www.internationalgenome.org/data-portal/data-collection/30x-grch38) is provided in [`example/1000G_highcov/`](example/1000G_highcov/). The pipeline uses SLURM array jobs to download each CRAM via Aspera, compute coverage with mosdepth, and then run NGS-PCA on the full cohort — all through a single container image with no additional software installation. See the [walkthrough](example/1000G_highcov/README.md) for details.
