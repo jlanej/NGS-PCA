@@ -510,21 +510,52 @@ jobs:
             -distribution UNIFORM \
             -bedExclude /app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz
 
-      - name: Verify Docker container output files exist
+      - name: Verify Docker container output matches expected checksums
         working-directory: example
         run: |
-          echo "Verifying NGS-PCA Docker output files..."
+          # The container is what actually ships, so it is held to the same reference values as
+          # the host build rather than merely to producing files. Note this run takes a directory
+          # as input while the host job takes a manifest, so it also covers that path.
+          echo "Comparing Docker container output against expected checksums..."
           FAILED=0
-          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt autosomal.median.txt; do
-            if [ -f "test_output_docker/$f" ]; then
-              echo "FOUND: $f"
-            else
-              echo "MISSING: $f"
-              FAILED=1
-            fi
-          done
-          if [ "$FAILED" -ne 0 ]; then
-            echo "::error::Docker container run failed to produce expected output files"
+          CHECKED=0
+
+          while IFS='  ' read -r expected_md5 filepath; do
+            [ -z "$expected_md5" ] && continue
+
+            # distribution_comparison.txt comes from a second, GAUSSIAN run that this job does not
+            # perform; the serialized matrices are excluded from checksumming everywhere
+            case "$filepath" in
+              ./exampleOutput_1000G_chr1/svd.*|./exampleOutput_1000G_chr1/autosomal.median.txt)
+                CHECKED=$((CHECKED + 1))
+                filename=$(basename "$filepath")
+                test_file="./test_output_docker/$filename"
+
+                if [ ! -f "$test_file" ]; then
+                  echo "MISSING: $test_file"
+                  FAILED=1
+                  continue
+                fi
+
+                actual_md5=$(md5sum "$test_file" | awk '{print $1}')
+                if [ "$actual_md5" = "$expected_md5" ]; then
+                  echo "PASS: $filename ($actual_md5)"
+                else
+                  echo "FAIL: $filename (expected: $expected_md5, got: $actual_md5)"
+                  FAILED=1
+                fi
+                ;;
+            esac
+          done < 1000G.chr1.md5
+
+          if [ "$CHECKED" -eq 0 ]; then
+            echo "::error::No container output files were checked - verify the MD5 file and output path patterns"
             exit 1
           fi
-          echo "Docker container test passed — all output files present."
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::Docker container output does not match the expected checksums"
+            exit 1
+          fi
+
+          echo "Docker container test passed — all $CHECKED output checksums match expected values."

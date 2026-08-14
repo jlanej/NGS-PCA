@@ -67,9 +67,18 @@ public class FileOps {
     return FileUtils.readLines(new File(path), Charset.defaultCharset());
   }
 
+  /**
+   * @param dir search this directory, recursively
+   * @param extensions file name endings to keep
+   * @return the matching paths, sorted
+   */
   static List<String> listFilesWithExtension(String dir, String[] extensions) {
+    // sorted because this order becomes the column order of the matrix, and so decides both the
+    // row order of the PC table and - through the random projection - the values themselves.
+    // Directory iteration order is whatever the filesystem returns: alphabetical on some, hashed
+    // on others, so without this the same cohort gives different results on different machines
     return FileUtils.listFiles(new File(dir), extensions, true).stream().map(File::getAbsolutePath)
-                    .collect(Collectors.toList());
+                    .sorted().collect(Collectors.toList());
   }
 
   /**
