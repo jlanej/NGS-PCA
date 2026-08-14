@@ -118,7 +118,9 @@ public class RandomizedSVD {
 
     log.info("Selecting randomized Q using distribution " + d.toString());
 
-    RealMatrix Y = A.multiply(randn(n, Math.min(n, numComponents + numOversamples), randomSeed, d));
+    RealMatrix Y = ParallelMultiply.multiply(A, randn(n, Math.min(n, numComponents + numOversamples),
+                                                     randomSeed, d),
+                                             pool);
 
     log.info("Caching A_t");
     BlockRealMatrix A_t = A.transpose();
@@ -129,11 +131,11 @@ public class RandomizedSVD {
       log.info("Y QR decomp");
       Y = ThinQR.orthonormalBasis(Y, pool);
       log.info("Computing A Y cross prod");
-      RealMatrix Z = A_t.multiply(Y);
+      RealMatrix Z = ParallelMultiply.multiply(A_t, Y, pool);
       log.info("Z QR decomp");
       Z = ThinQR.orthonormalBasis(Z, pool);
       log.info("A %*% Z");
-      Y = A.multiply(Z);
+      Y = ParallelMultiply.multiply(A, Z, pool);
     }
 
     RealMatrix Q = ThinQR.orthonormalBasis(Y, pool);
