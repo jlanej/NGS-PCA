@@ -1,6 +1,7 @@
 package org.pankratzlab.ngspca;
 
 import java.util.Arrays;
+import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.MatrixUtils;
@@ -20,8 +21,8 @@ import org.apache.commons.math3.linear.RealMatrix;
  * columns updated by each Householder step are independent of each other, so they are updated in
  * parallel. Both leave every value's arithmetic untouched.
  * <p>
- * Parallelism comes from the common {@link java.util.concurrent.ForkJoinPool}, which can be capped
- * with {@code -Djava.util.concurrent.ForkJoinPool.common.parallelism=N}.
+ * Parallelism is bounded by the {@link ForkJoinPool} the caller supplies, so a run uses the cores
+ * it was given rather than every core it can see.
  */
 class ThinQR {
 
@@ -31,9 +32,10 @@ class ThinQR {
 
   /**
    * @param matrix a matrix with at least as many rows as columns
+   * @param pool the column updates run here, and nowhere else
    * @return the thin Q of its QR decomposition, with the same dimensions
    */
-  static RealMatrix orthonormalBasis(RealMatrix matrix) {
+  static RealMatrix orthonormalBasis(RealMatrix matrix, ForkJoinPool pool) {
     int m = matrix.getRowDimension();
     int n = matrix.getColumnDimension();
     if (m < n) {
@@ -44,7 +46,7 @@ class ThinQR {
     for (int column = 0; column < n; column++) {
       columns[column] = matrix.getColumn(column);
     }
-    double[][] q = decompose(columns, m, n);
+    double[][] q = decompose(columns, m, n, pool);
 
     // back to row-major, and built through MatrixUtils so the implementation chosen for the result
     // is the one the caller would have got before: it picks by size, and RealMatrix implementations
@@ -63,9 +65,10 @@ class ThinQR {
    * @param columns the matrix, one column per entry, overwritten with the Householder vectors
    * @param m rows
    * @param n columns
+   * @param pool the column updates run here
    * @return the thin Q, one column per entry
    */
-  private static double[][] decompose(double[][] columns, int m, int n) {
+  private static double[][] decompose(double[][] columns, int m, int n, ForkJoinPool pool) {
     for (int k = 0; k < n; k++) {
       final double[] pivot = columns[k];
       final int from = k;
@@ -86,7 +89,7 @@ class ThinQR {
       pivot[k] += 1.0;
 
       // each column is reflected using the pivot alone, so they do not interact
-      IntStream.range(k + 1, n).parallel().forEach(j -> reflect(pivot, columns[j], from, m));
+      inPool(pool, k + 1, n, j -> reflect(pivot, columns[j], from, m));
     }
 
     double[][] q = new double[n][];
@@ -99,10 +102,18 @@ class ThinQR {
       Arrays.fill(q[k], 0.0);
       q[k][k] = 1.0;
       if (pivot[k] != 0) {
-        IntStream.range(k, n).parallel().forEach(j -> reflect(pivot, q[j], from, m));
+        inPool(pool, k, n, j -> reflect(pivot, q[j], from, m));
       }
     }
     return q;
+  }
+
+  /**
+   * Run {@code action} over [from, to) in the given pool. Submitting the stream is what confines it
+   * there; a bare parallel stream would use the common pool and every core on the machine.
+   */
+  private static void inPool(ForkJoinPool pool, int from, int to, java.util.function.IntConsumer action) {
+    pool.submit(() -> IntStream.range(from, to).parallel().forEach(action)).join();
   }
 
   /**

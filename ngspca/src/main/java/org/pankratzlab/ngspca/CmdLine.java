@@ -78,7 +78,7 @@ class CmdLine {
 
     final Option numThreads = Option.builder("t").hasArg(true).required().longOpt(NUM_THREADS_ARG)
                                     .hasArg()
-                                    .desc("Number of threads to utilize when loading data. Default is "
+                                    .desc("Number of threads to utilize, both when loading data and in the parallel steps of the decomposition. Set this to the cores your job was allocated. Default is "
                                           + DEFAULT_THREADS)
                                     .required(false).build();
 

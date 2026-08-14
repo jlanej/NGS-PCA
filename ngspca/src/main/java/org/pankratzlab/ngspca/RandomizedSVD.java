@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ForkJoinPool;
 import java.util.StringJoiner;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -80,9 +81,20 @@ public class RandomizedSVD {
    *          least 10 is recommended,
    * @param randomSeed random seed for sampling matrix
    * @param d distribution to use for generating the initial random matrix
+   * @param threads how many threads the decomposition may use
    */
   public void fit(BlockRealMatrix A, int numberOfComponentsToStore, int niters, int numOversamples,
-                  int randomSeed, DISTRIBUTION d) {
+                  int randomSeed, DISTRIBUTION d, int threads) {
+    ForkJoinPool pool = new ForkJoinPool(Math.max(1, threads));
+    try {
+      fit(A, numberOfComponentsToStore, niters, numOversamples, randomSeed, d, pool);
+    } finally {
+      pool.shutdown();
+    }
+  }
+
+  private void fit(BlockRealMatrix A, int numberOfComponentsToStore, int niters, int numOversamples,
+                   int randomSeed, DISTRIBUTION d, ForkJoinPool pool) {
     this.numComponents = Math.min(numberOfComponentsToStore,
                                   Math.min(A.getColumnDimension(), A.getRowDimension()));
     if (numComponents < numberOfComponentsToStore) {
@@ -115,16 +127,16 @@ public class RandomizedSVD {
     for (int i = 0; i < niters; i++) {
       log.info("Subspace iteration: " + Integer.toString(i));
       log.info("Y QR decomp");
-      Y = ThinQR.orthonormalBasis(Y);
+      Y = ThinQR.orthonormalBasis(Y, pool);
       log.info("Computing A Y cross prod");
       RealMatrix Z = A_t.multiply(Y);
       log.info("Z QR decomp");
-      Z = ThinQR.orthonormalBasis(Z);
+      Z = ThinQR.orthonormalBasis(Z, pool);
       log.info("A %*% Z");
       Y = A.multiply(Z);
     }
 
-    RealMatrix Q = ThinQR.orthonormalBasis(Y);
+    RealMatrix Q = ThinQR.orthonormalBasis(Y, pool);
     log.info("Q^T %*% A");
     RealMatrix B = Q.transpose().multiply(A);
     log.info("SVD of reduced matrix");
