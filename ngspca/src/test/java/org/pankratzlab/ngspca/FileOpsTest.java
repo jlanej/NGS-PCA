@@ -45,6 +45,26 @@ public class FileOpsTest extends TestCase {
     }
   }
 
+  /**
+   * The extension is a literal suffix. It was previously handed to replaceAll, which reads it as a
+   * regular expression and strips every occurrence rather than the trailing one - so a path that
+   * happens to contain the extension elsewhere lost part of the sample name.
+   */
+  public void testStripsTheExtensionOnlyFromTheEnd() {
+    String ext = MosdepthUtils.MOSDEPTH_BED_EXT;
+
+    assertEquals("sample.cram.by1000.",
+                 FileOps.stripDirectoryAndExtension("/data/sample.cram.by1000." + ext, ext));
+    // a directory named after the extension, which the regular expression matched too
+    assertEquals("sample.",
+                 FileOps.stripDirectoryAndExtension("/data/" + ext + "/sample." + ext, ext));
+    // the extension inside the file name itself
+    assertEquals("sample." + ext + ".x.",
+                 FileOps.stripDirectoryAndExtension("sample." + ext + ".x." + ext, ext));
+    // nothing to strip
+    assertEquals("sample.bed", FileOps.stripDirectoryAndExtension("/data/sample.bed", ext));
+  }
+
   public void testWriteToTextRoundTrips() throws Exception {
     File out = File.createTempFile("ngspca.text", ".txt");
     out.deleteOnExit();

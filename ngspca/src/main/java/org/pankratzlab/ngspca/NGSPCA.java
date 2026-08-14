@@ -208,8 +208,6 @@ public class NGSPCA {
       CoverageMedians.write(medianDm, CoverageMedians.AUTOSOMAL_COLUMN, samples,
                             normalized.columnMedians, regions.size(), log);
     } else {
-      System.out.print("Loading");
-      System.err.print("Loading");
       dm = readCachedMatrix(tmpNormDm, log);
       recoverMedians(medianDm, tmpRawDm, samples, regions.size(), log);
     }

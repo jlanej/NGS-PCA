@@ -35,9 +35,17 @@ public class FileOps {
 
   }
 
+  /**
+   * @param path a file path
+   * @param extension remove this from the end of the file name
+   * @return the file name, without directories and without a trailing extension
+   */
   static String stripDirectoryAndExtension(String path, String extension) {
 
-    return FilenameUtils.getName(path).replaceAll(extension, "");
+    // a literal trailing suffix: replaceAll would read the extension as a regular expression, and
+    // would strip it everywhere it appears rather than only at the end
+    String name = FilenameUtils.getName(path);
+    return name.endsWith(extension) ? name.substring(0, name.length() - extension.length()) : name;
   }
 
   static boolean fileExists(String path) {
