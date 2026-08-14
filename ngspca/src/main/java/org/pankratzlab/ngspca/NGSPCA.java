@@ -191,8 +191,8 @@ public class NGSPCA {
                                                                              new HashSet<String>(regions),
                                                                              tmpRawDm, threads,
                                                                              log);
-      dm = normalized.matrix;
-      CoverageMedians.write(medianDm, samples, normalized.columnMedians, regions.size(), log);
+      dm = normalized.matrix();
+      CoverageMedians.write(medianDm, samples, normalized.columnMedians(), regions.size(), log);
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
       dm = readCachedMatrix(tmpNormDm, log);

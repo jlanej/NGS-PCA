@@ -181,16 +181,10 @@ public class RandomizedSVD {
 
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < columns; j++) {
-        switch (d) {
-          case UNIFORM:
-            m.setEntry(i, j, twister.nextDouble());
-            break;
-          case GAUSSIAN:
-            m.setEntry(i, j, twister.nextGaussian());
-            break;
-          default:
-            throw new IllegalArgumentException("Unsupported distribution: " + d);
-        }
+        m.setEntry(i, j, switch (d) {
+          case UNIFORM -> twister.nextDouble();
+          case GAUSSIAN -> twister.nextGaussian();
+        });
       }
     }
     return m;
