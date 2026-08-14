@@ -96,11 +96,21 @@ BlockRealMatrix A_t = A.transpose();
 
 Apache Commons Math's `transpose()` physically allocates and copies all data into a new matrix. For large inputs (e.g., 10⁶ bins × 2000 samples), this roughly doubles RAM usage.
 
-**It is worse than doubling, and this is now the ceiling that binds first.** `fit` may hold three
-full copies at once: the caller's matrix, which `computeSVD` still references throughout; the
-shape transpose taken when there are fewer rows than columns; and this cached `A_t`. At 140k by
-140k that is roughly 471 GB for a 157 GB matrix. Since the decomposition was parallelised, a
-cohort will run out of memory before it runs out of time.
+**How many copies are live depends on the orientation.** `fit` always holds the caller's matrix,
+which `computeSVD` references throughout, plus this cached `A_t` — two copies, so 314 GB for a
+157 GB matrix. When there are fewer rows than columns it also takes a shape transpose, making
+three (471 GB); with more bins than samples, the usual case, that branch is not taken.
+
+Two things follow. In the three-copy case the fix is trivial and has no arithmetic in it: after a
+shape transpose, `A.transpose()` recomputes `(originalᵀ)ᵀ`, which is the matrix already in hand,
+so `A_t` should reuse that reference rather than allocate.
+
+The two-copy case is the one worth work, and there is a route that has been checked:
+`(Yᵀ A)ᵀ` is bit-identical to `Aᵀ Y`, verified over four shapes. Multiplication commutes exactly
+in IEEE 754 and both forms sum over the same shared index in the same block order, so `A_t` need
+never be materialised — only `Y` and the result get transposed, and both are small. The catch is
+that `ParallelMultiply` divides by columns of the right-hand matrix, which in `Yᵀ A` is the large
+one; keeping the parallelism would need a variant that divides by rows of the left instead.
 
 **Recommended fix:** a lazy transpose wrapper (`RealMatrix` subclass) translating row/column
 indices without copying. Note it must keep `BlockRealMatrix.multiply`'s blocked path reachable, or
