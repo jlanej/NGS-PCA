@@ -104,37 +104,26 @@ public class RandomizedSVD {
     log.info("Initializing matrices");
 
     int n = A.getColumnDimension();
-    // the transpose below leaves this true of A from here on: at least as many rows as columns,
-    // which is what every QR taken of a product of it relies on
     transpose = A.getRowDimension() < n;
     rsvd[0] = MatrixUtils.createRealMatrix(A.getRowDimension(), numComponents);
     rsvd[1] = MatrixUtils.createRealMatrix(numComponents, 1);
     rsvd[2] = MatrixUtils.createRealMatrix(A.getColumnDimension(), numComponents);
 
-    // kept because it is A's transpose whenever the branch below is taken
-    BlockRealMatrix asGiven = A;
+    // The decomposition wants a matrix with at least as many rows as columns, and its transpose.
+    // Neither is materialised: every product either one appears in is taken through the matrix as
+    // given, using (X^T M)^T = M^T X. At cohort scale each transpose would be a second copy of
+    // something measured in hundreds of gigabytes, and taking the product this way is also faster,
+    // since dividing the large matrix by column-blocks yields far more tasks than dividing the
+    // small one does.
     if (transpose) {
-      log.info("Transposing, since row N <column N");
-      A = A.transpose();
-      n = A.getColumnDimension();
+      log.info("Treating the input as transposed, since row N < column N");
+      n = A.getRowDimension();
     }
 
     log.info("Selecting randomized Q using distribution " + d.toString());
 
-    RealMatrix Y = ParallelMultiply.multiply(A, randn(n, Math.min(n, numComponents + numOversamples),
-                                                     randomSeed, d),
-                                             pool);
-
-    // A^T of a matrix that was itself transposed above is the one that came in, so there is no
-    // second copy of it to make - which matters when the matrix is the size of a cohort
-    BlockRealMatrix A_t;
-    if (transpose) {
-      log.info("Using the input as A_t, since A is its transpose");
-      A_t = asGiven;
-    } else {
-      log.info("Caching A_t");
-      A_t = A.transpose();
-    }
+    RealMatrix Y = times(A, randn(n, Math.min(n, numComponents + numOversamples), randomSeed, d),
+                         pool);
 
     log.info("Beginning LU decomp iterations");
     for (int i = 0; i < niters; i++) {
@@ -142,16 +131,16 @@ public class RandomizedSVD {
       log.info("Y QR decomp");
       Y = ThinQR.orthonormalBasis(Y, pool);
       log.info("Computing A Y cross prod");
-      RealMatrix Z = ParallelMultiply.multiply(A_t, Y, pool);
+      RealMatrix Z = transposeTimes(A, Y, pool);
       log.info("Z QR decomp");
       Z = ThinQR.orthonormalBasis(Z, pool);
       log.info("A %*% Z");
-      Y = ParallelMultiply.multiply(A, Z, pool);
+      Y = times(A, Z, pool);
     }
 
     RealMatrix Q = ThinQR.orthonormalBasis(Y, pool);
     log.info("Q^T %*% A");
-    RealMatrix B = Q.transpose().multiply(A);
+    RealMatrix B = transposeTimes(A, Q, pool).transpose();
     log.info("SVD of reduced matrix");
     SingularValueDecomposition svd = new SingularValueDecomposition(B);
 
@@ -175,6 +164,32 @@ public class RandomizedSVD {
 
       log.info("Finished SVD");
     }
+  }
+
+  /**
+   * A X, where A is the input when it has at least as many rows as columns and its transpose
+   * otherwise
+   */
+  private RealMatrix times(BlockRealMatrix input, RealMatrix x, ForkJoinPool pool) {
+    return transpose ? transposeProduct(input, x, pool) : ParallelMultiply.multiply(input, x, pool);
+  }
+
+  /**
+   * A^T X, for the same A
+   */
+  private RealMatrix transposeTimes(BlockRealMatrix input, RealMatrix x, ForkJoinPool pool) {
+    return transpose ? ParallelMultiply.multiply(input, x, pool) : transposeProduct(input, x, pool);
+  }
+
+  /**
+   * M^T X as (X^T M)^T, so M^T never exists. X is the narrow matrix, so transposing it and the
+   * result costs a fraction of what transposing M would.
+   */
+  private static RealMatrix transposeProduct(BlockRealMatrix m, RealMatrix x, ForkJoinPool pool) {
+    // through a BlockRealMatrix regardless of what x is, so the product takes the blocked path it
+    // would have taken with M^T on the left
+    BlockRealMatrix xt = new BlockRealMatrix(x.transpose().getData());
+    return ParallelMultiply.multiply(xt, m, pool).transpose();
   }
 
   /**

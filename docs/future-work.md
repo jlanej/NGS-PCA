@@ -84,41 +84,25 @@ Additionally, consider using Commons Math matrix visitor patterns (`RealMatrixCh
 
 ---
 
-## 4. Avoid deep-copy transposition for large matrices (memory)
+## 4. Avoid deep-copy transposition for large matrices — DONE
 
-**File:** `ngspca/src/main/java/org/pankratzlab/ngspca/RandomizedSVD.java`
+Neither transpose is materialised any more. `fit` needs a matrix with at least as many rows as
+columns and also its transpose; it now holds only the matrix as given, and takes every product
+either one appears in through it, using `Mᵀ X = (Xᵀ M)ᵀ`. Only the narrow matrix and the result are
+transposed, and both are a fraction of the size.
 
-The algorithm caches an explicit transposed copy of the input matrix:
+Peak drops from two full copies to one — roughly 314 GB to 157 GB for a 140k by 140k cohort — in
+both orientations, where before the second copy was the cached `A_t` with more bins than samples
+and the shape transpose with more samples than bins.
 
-```java
-BlockRealMatrix A_t = A.transpose();
-```
+It is also faster, which was not the point but is the larger effect: 2.0 s against 3.7 s for one
+product at 8000 by 8000. Dividing the large matrix by column-blocks yields hundreds of tasks where
+dividing the narrow one yielded ten, so the ceiling in item 4b does not bind on this product.
 
-Apache Commons Math's `transpose()` physically allocates and copies all data into a new matrix. For large inputs (e.g., 10⁶ bins × 2000 samples), this roughly doubles RAM usage.
-
-**How many copies are live depends on the orientation.** `fit` always holds the caller's matrix,
-which `computeSVD` references throughout, plus this cached `A_t` — two copies, so 314 GB for a
-157 GB matrix. When there are fewer rows than columns it also takes a shape transpose, making
-three (471 GB). Which applies depends on the bin selection rather than on cohort size alone: an
-analysis over every autosomal bin has far more bins than samples and never takes that branch,
-while one restricted to selected bins can have fewer bins than samples once the cohort is large,
-and then the third copy is present on every run.
-
-The three-copy case is **fixed**: after a shape transpose, `A.transpose()` was recomputing
-`(originalᵀ)ᵀ`, which is the matrix already in hand, so `A_t` now reuses that reference instead of
-allocating. No arithmetic is involved and the output is unchanged.
-
-The two-copy case is the one worth work, and there is a route that has been checked:
-`(Yᵀ A)ᵀ` is bit-identical to `Aᵀ Y`, verified over four shapes. Multiplication commutes exactly
-in IEEE 754 and both forms sum over the same shared index in the same block order, so `A_t` need
-never be materialised — only `Y` and the result get transposed, and both are small. The catch is
-that `ParallelMultiply` divides by columns of the right-hand matrix, which in `Yᵀ A` is the large
-one; keeping the parallelism would need a variant that divides by rows of the left instead.
-
-**Recommended fix:** a lazy transpose wrapper (`RealMatrix` subclass) translating row/column
-indices without copying. Note it must keep `BlockRealMatrix.multiply`'s blocked path reachable, or
-the products fall back to the generic one and every committed checksum moves — the parity tests in
-`ParallelMultiplyTest` are the gate for any attempt.
+The identity holds to the bit — multiplication commutes exactly in IEEE 754 and both forms sum over
+the same shared index in the same block order — and is pinned by
+`ParallelMultiplyTest.testTransposedProductMatchesAMaterialisedTranspose`. Verified end to end in
+both orientations, including against upstream `PankratzLab@2ffbcfc`.
 
 ---
 
