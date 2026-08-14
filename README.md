@@ -103,7 +103,7 @@ java -Xmx1800G -jar ngspca-vX.Y.jar \
 
 ### Building from source
 
-Requires Java 11+ and Maven 3.6+:
+Requires Java 21+ and Maven 3.6+:
 
 ```bash
 git clone https://github.com/jlanej/NGS-PCA.git
