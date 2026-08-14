@@ -170,63 +170,38 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 
 ### Per-sample median depth
 
-Normalization divides each sample by its own median depth before taking the log2
-fold change, so that median already exists — `autosomal.median.txt` simply reports
-it rather than making downstream tools re-derive it from the mosdepth files. It
-costs one small table and no additional pass over the data.
+Normalization already divides each sample by its own median depth, so
+`autosomal.median.txt` reports that median instead of leaving downstream tools to
+re-derive it from the mosdepth files — no extra pass over the data.
 
 ```
 SAMPLE                       AUTO_HQ_median   N_BINS
 HG00156.<...>.cram.by1000.   8.99             15593
 ```
 
-`AUTO_HQ_median` is the median over exactly the bins PCA used: autosomal, minus
-anything overlapping `-bedExclude`, minus anything dropped by `-sampleEvery`.
-`N_BINS` records how many that was, so a run that sampled or over-excluded is
-visible in the file itself. The value is **not** floored — a sample reported at or
-near zero is an empty or failed input, and is logged as a warning.
+The median is over exactly the bins PCA used — autosomal, less `-bedExclude`
+overlaps and whatever `-sampleEvery` dropped — with `N_BINS` recording how many
+that was. Values are not floored, so an empty or failed sample reads as zero, and
+is logged as a warning.
 
-The file is written as soon as normalization finishes, before the SVD, so it
-survives a run that fails or is killed later.
-
-It is written only on a run that reads the mosdepth files. A re-run that reuses a
-cached `tmp.mat.ser.gz` skips normalization altogether, so it neither writes the
-table nor refreshes one already there — which matters if you change
-`-sampleSuffix` between runs against the same output directory, since the PC
-table is rewritten every run and the two would then no longer agree. Pass
-`-overwrite`, or write to a fresh directory.
-
-`-matrix` does not produce the table at all, with or without `-normalizeMatrix`.
-The rows of a supplied matrix were not chosen here, so NGS-PCA cannot say they
-are the autosomal, exclusion-filtered bins that make the median mean what a
-reader of this file would take it to mean.
+Only a run that reads the mosdepth files writes it. `-matrix` does not produce it
+at all, and a run reusing a cached `tmp.mat.ser.gz` neither writes it nor
+refreshes one already there — use `-overwrite` or a fresh output directory.
 
 ### Sample identifiers
 
-Every output that names samples uses the same identifiers — `svd.pcs.txt`,
-`svd.samples.txt` and the median table all agree — so they join to each other.
-
-A sample's name is its mosdepth file name with the `regions.bed.gz` extension
-removed. That extension carries no leading dot, so the name keeps a trailing one,
-along with whatever the naming convention put in front of it:
+A sample is named by its mosdepth file name with the `regions.bed.gz` extension
+removed. The extension carries no leading dot, so a trailing one survives:
 
 ```
 HG00156.<...>.cram.by1000.regions.bed.gz  ->  HG00156.<...>.cram.by1000.
+-sampleSuffix .by1000.                    ->  HG00156.<...>.cram
 ```
 
-A tool that built its own depth matrix from the same files will usually have
-named that sample `HG00156.<...>.cram`, and matching identifiers has to be exact.
-Rather than rewriting the tables afterwards, `-sampleSuffix .by1000.` removes the
-suffix once, everywhere:
-
-```
--sampleSuffix .by1000.  ->  HG00156.<...>.cram
-```
-
-It is a literal suffix, not a pattern, and only removed where it actually trails.
-A suffix that matches no sample name is treated as a typo, and one that makes two
-samples collide is refused, because both would otherwise surface downstream as
-samples silently dropped from a join.
+Every output that names samples uses the same identifiers, so `-sampleSuffix`
+lines all of them up at once with whatever built your depth matrix. It removes a
+literal suffix where it trails; one that matches nothing, or that makes two
+samples collide, stops the run.
 
 ## 1000 Genomes 30x high-coverage example
 
