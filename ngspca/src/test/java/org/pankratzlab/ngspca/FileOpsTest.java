@@ -3,7 +3,9 @@ package org.pankratzlab.ngspca;
 import java.io.File;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.logging.Logger;
 import junit.framework.TestCase;
 
@@ -63,6 +65,32 @@ public class FileOpsTest extends TestCase {
                  FileOps.stripDirectoryAndExtension("sample." + ext + ".x." + ext, ext));
     // nothing to strip
     assertEquals("sample.bed", FileOps.stripDirectoryAndExtension("/data/sample.bed", ext));
+  }
+
+  /**
+   * Sample order becomes matrix column order, which decides the PC table's row order and, through
+   * the random projection, the values. Directory iteration order is filesystem-dependent, so it
+   * cannot be what determines it.
+   */
+  public void testDirectoryListingIsSorted() throws Exception {
+    File dir = Files.createTempDirectory("ngspca.listing").toFile();
+    dir.deleteOnExit();
+    // created in an order that is neither alphabetical nor reverse
+    for (String name : new String[] {"sampleC", "sampleA", "sampleD", "sampleB"}) {
+      File f = new File(dir, name + "." + MosdepthUtils.MOSDEPTH_BED_EXT);
+      assertTrue(f.createNewFile());
+      f.deleteOnExit();
+    }
+
+    List<String> found = FileOps.listFilesWithExtension(dir.getAbsolutePath(),
+                                                        new String[] {MosdepthUtils.MOSDEPTH_BED_EXT});
+
+    assertEquals(4, found.size());
+    List<String> names = new ArrayList<>();
+    for (String path : found) {
+      names.add(FileOps.stripDirectoryAndExtension(path, MosdepthUtils.MOSDEPTH_BED_EXT));
+    }
+    assertEquals(Arrays.asList("sampleA.", "sampleB.", "sampleC.", "sampleD."), names);
   }
 
   public void testWriteToTextRoundTrips() throws Exception {

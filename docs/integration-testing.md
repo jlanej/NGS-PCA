@@ -4,7 +4,7 @@ CI runs automatically on every pull request and push to `main`/`master` via [`.g
 
 ## Reproducing the integration test locally
 
-**Prerequisites:** Java 11+, Maven 3.6+, Python 3
+**Prerequisites:** Java 21+, Maven 3.6+, Python 3
 
 **1. Clone the repository and build:**
 

@@ -68,7 +68,11 @@ public class RandomizedSVD {
   }
 
   /**
-   * @param A matrix to perform randomized PCA on
+   * @param A matrix to perform randomized PCA on. Its column order is part of the computation
+   *          rather than labelling: the projection below multiplies the columns as they stand by a
+   *          random matrix fixed by {@code randomSeed}, so the same data in a different column
+   *          order gives results that differ within the approximation error of the method. Callers
+   *          are responsible for column order being something that reproduces
    * @param numberOfComponentsToStore number of PCs to compute
    * @param niters specifies the number of power (subspace) iterations to reduce the approximation
    *          error. The power scheme is recommended, if the singular values decay slowly. In

@@ -103,7 +103,7 @@ java -Xmx1800G -jar ngspca-vX.Y.jar \
 
 ### Building from source
 
-Requires Java 11+ and Maven 3.6+:
+Requires Java 21+ and Maven 3.6+:
 
 ```bash
 git clone https://github.com/jlanej/NGS-PCA.git
@@ -203,6 +203,17 @@ lines all of them up at once with whatever built your depth matrix. It removes a
 literal suffix where it trails; one that matches nothing, or that makes two
 samples collide, stops the run. Mosdepth input only — the column names of a
 `-matrix` are used as they are.
+
+### Sample order
+
+Sample order is matrix column order, and the randomized SVD multiplies those
+columns as they stand by a random matrix fixed by `-randomSeed` — so order is
+part of the computation, not just labelling. Reordering the same cohort moves the
+PCs within the method's approximation error, not beyond it.
+
+A directory given to `-input` is therefore sorted, so a run reproduces wherever
+the directory happens to live; a file listing paths is used in the order written,
+which is what makes that order yours to fix.
 
 ## 1000 Genomes 30x high-coverage example
 

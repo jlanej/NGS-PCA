@@ -1,11 +1,11 @@
-FROM maven:3.9-eclipse-temurin-11 AS build
+FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app/ngspca
 COPY ngspca/pom.xml .
 COPY ngspca/src ./src
 RUN mvn -B package \
  && cp target/ngspca-*.jar target/ngspca.jar
 
-FROM eclipse-temurin:11-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
 # --- Bundled tools for end-to-end 1000G high-coverage pipeline -----------
