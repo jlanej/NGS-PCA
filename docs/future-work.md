@@ -99,11 +99,14 @@ Apache Commons Math's `transpose()` physically allocates and copies all data int
 **How many copies are live depends on the orientation.** `fit` always holds the caller's matrix,
 which `computeSVD` references throughout, plus this cached `A_t` — two copies, so 314 GB for a
 157 GB matrix. When there are fewer rows than columns it also takes a shape transpose, making
-three (471 GB); with more bins than samples, the usual case, that branch is not taken.
+three (471 GB). Which applies depends on the bin selection rather than on cohort size alone: an
+analysis over every autosomal bin has far more bins than samples and never takes that branch,
+while one restricted to selected bins can have fewer bins than samples once the cohort is large,
+and then the third copy is present on every run.
 
-Two things follow. In the three-copy case the fix is trivial and has no arithmetic in it: after a
-shape transpose, `A.transpose()` recomputes `(originalᵀ)ᵀ`, which is the matrix already in hand,
-so `A_t` should reuse that reference rather than allocate.
+The three-copy case is **fixed**: after a shape transpose, `A.transpose()` was recomputing
+`(originalᵀ)ᵀ`, which is the matrix already in hand, so `A_t` now reuses that reference instead of
+allocating. No arithmetic is involved and the output is unchanged.
 
 The two-copy case is the one worth work, and there is a route that has been checked:
 `(Yᵀ A)ᵀ` is bit-identical to `Aᵀ Y`, verified over four shapes. Multiplication commutes exactly

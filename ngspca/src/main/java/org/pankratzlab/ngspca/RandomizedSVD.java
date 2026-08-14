@@ -111,6 +111,8 @@ public class RandomizedSVD {
     rsvd[1] = MatrixUtils.createRealMatrix(numComponents, 1);
     rsvd[2] = MatrixUtils.createRealMatrix(A.getColumnDimension(), numComponents);
 
+    // kept because it is A's transpose whenever the branch below is taken
+    BlockRealMatrix asGiven = A;
     if (transpose) {
       log.info("Transposing, since row N <column N");
       A = A.transpose();
@@ -123,8 +125,16 @@ public class RandomizedSVD {
                                                      randomSeed, d),
                                              pool);
 
-    log.info("Caching A_t");
-    BlockRealMatrix A_t = A.transpose();
+    // A^T of a matrix that was itself transposed above is the one that came in, so there is no
+    // second copy of it to make - which matters when the matrix is the size of a cohort
+    BlockRealMatrix A_t;
+    if (transpose) {
+      log.info("Using the input as A_t, since A is its transpose");
+      A_t = asGiven;
+    } else {
+      log.info("Caching A_t");
+      A_t = A.transpose();
+    }
 
     log.info("Beginning LU decomp iterations");
     for (int i = 0; i < niters; i++) {
