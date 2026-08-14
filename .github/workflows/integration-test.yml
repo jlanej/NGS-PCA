@@ -598,7 +598,7 @@ jobs:
             -oversample 60 \
             -randomSeed 42 \
             -threads 4 \
-            -distribution UNIFORM | tee "${RUNNER_TEMP}/run.log"
+            -distribution UNIFORM 2>&1 | tee "${RUNNER_TEMP}/run.log"
 
           # the point of the fixture: fail loudly if it stopped exercising the branch it exists for
           grep -q "Transposing, since" "${RUNNER_TEMP}/run.log" \
