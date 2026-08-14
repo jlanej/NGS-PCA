@@ -291,20 +291,7 @@ Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 ---
 
-### 5.2 EJML — Efficient Java Matrix Library
-
-**Abeles, P. (2022).** Efficient Java Matrix Library (EJML).
-<https://ejml.org/>
-GitHub: <https://github.com/lessthanoptimal/ejml>
-Version used: **0.30** (declared in `ngspca/pom.xml`)
-License: **Apache License 2.0** — <https://github.com/lessthanoptimal/ejml/blob/master/LICENSE-2.0.txt>
-Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
-
-> **How used:** Dense matrix operations in the Java source. Declared as a dependency in `pom.xml`.
-
----
-
-### 5.3 JAMA — Java Matrix Package
+### 5.2 JAMA — Java Matrix Package
 
 **Hicklin, J., Moler, C., Webb, P., Boisvert, R. F., Miller, B., Pozo, R., & Remington, K.**
 JAMA: A Java Matrix Package.
@@ -321,7 +308,7 @@ United States. See the project home page: <https://math.nist.gov/javanumerics/ja
 
 ---
 
-### 5.4 Apache Commons CLI
+### 5.3 Apache Commons CLI
 
 The Apache Software Foundation. Commons CLI: Command Line Interface.
 <https://commons.apache.org/proper/commons-cli/>
@@ -334,7 +321,7 @@ Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 ---
 
-### 5.5 Apache Commons Lang
+### 5.4 Apache Commons Lang
 
 The Apache Software Foundation. Commons Lang.
 <https://commons.apache.org/proper/commons-lang/>
@@ -346,7 +333,7 @@ Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 ---
 
-### 5.6 Apache Commons IO
+### 5.5 Apache Commons IO
 
 The Apache Software Foundation. Commons IO.
 <https://commons.apache.org/proper/commons-io/>
@@ -358,7 +345,7 @@ Full license text: <https://www.apache.org/licenses/LICENSE-2.0.txt>
 
 ---
 
-### 5.7 HTSJDK
+### 5.6 HTSJDK
 
 Broad Institute & collaborators. HTSJDK: A Java API for high-throughput sequencing data (HTS)
 formats.
@@ -372,7 +359,7 @@ License: **MIT License** — <https://github.com/samtools/htsjdk/blob/master/LIC
 
 ---
 
-### 5.8 JUnit
+### 5.7 JUnit
 
 JUnit Contributors. JUnit — Java Testing Framework.
 <https://junit.org/>

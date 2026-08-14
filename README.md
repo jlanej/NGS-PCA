@@ -140,6 +140,7 @@ java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
 | `-threads` | Threads for loading mosdepth files. | 4 |
 | `-bedExclude` | BED file of regions to exclude before PCA. | — |
 | `-sampleEvery` | Keep every *n*-th bin (0 or 1 = use all bins). | 1 |
+| `-sampleSuffix` | Literal suffix to remove from every sample name, e.g. `.by1000.` (see [Sample identifiers](#sample-identifiers)). | — |
 | `-overwrite` | Flag: overwrite existing temporary (cached) files and recompute each step. | false |
 
 ### Exclusion BED files
@@ -165,6 +166,43 @@ For custom WES analyses, concatenate the WGS exclusion BED with a 20 kb-buffered
 | `svd.singularvalues.txt` | Singular values per PC |
 | `svd.bins.txt` | Genomic bins retained after filtering |
 | `svd.samples.txt` | Sample identifiers |
+| `autosomal.median.txt` | Per-sample median depth across the bins used (see below) |
+
+### Per-sample median depth
+
+Normalization already divides each sample by its own median depth, so
+`autosomal.median.txt` reports that median instead of leaving downstream tools to
+re-derive it from the mosdepth files — no extra pass over the data.
+
+```
+SAMPLE                       AUTO_HQ_median   N_BINS
+HG00156.<...>.cram.by1000.   8.99             15593
+```
+
+The median is over exactly the bins PCA used — autosomal, less `-bedExclude`
+overlaps and whatever `-sampleEvery` dropped — with `N_BINS` recording how many
+that was. Values are not floored, so an empty or failed sample reads as zero, and
+is logged as a warning.
+
+Only a run that reads the mosdepth files writes it. `-matrix` does not produce it
+at all, and a run reusing a cached `tmp.mat.ser.gz` neither writes it nor
+refreshes one already there — use `-overwrite` or a fresh output directory.
+
+### Sample identifiers
+
+A sample is named by its mosdepth file name with the `regions.bed.gz` extension
+removed. The extension carries no leading dot, so a trailing one survives:
+
+```
+HG00156.<...>.cram.by1000.regions.bed.gz  ->  HG00156.<...>.cram.by1000.
+-sampleSuffix .by1000.                    ->  HG00156.<...>.cram
+```
+
+Every output that names samples uses the same identifiers, so `-sampleSuffix`
+lines all of them up at once with whatever built your depth matrix. It removes a
+literal suffix where it trails; one that matches nothing, or that makes two
+samples collide, stops the run. Mosdepth input only — the column names of a
+`-matrix` are used as they are.
 
 ## 1000 Genomes 30x high-coverage example
 

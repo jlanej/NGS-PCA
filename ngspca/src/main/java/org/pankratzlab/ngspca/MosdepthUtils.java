@@ -12,7 +12,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
-import org.ejml.data.DenseMatrix64F;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.BedUtils.BedRegionResult;
 import htsjdk.tribble.bed.BEDFeature;
@@ -56,17 +55,35 @@ class MosdepthUtils {
   }
 
   /**
+   * Stores a normalized matrix alongside the per-sample medians it was normalized against
+   */
+  static class NormalizedResult {
+
+    final BlockRealMatrix matrix;
+
+    /**
+     * per-column (per-sample) median of the raw input, in matrix column order
+     */
+    final double[] columnMedians;
+
+    private NormalizedResult(BlockRealMatrix matrix, double[] columnMedians) {
+      this.matrix = matrix;
+      this.columnMedians = columnMedians;
+    }
+  }
+
+  /**
    * @param mosDepthResultFiles mosdepth output bed files to be processed
    * @param ucscRegions {@link Set} of regions to process
    * @param threads number of threads to use when loading
    * @param log
-   * @return
+   * @return the normalized matrix and the per-sample medians it was normalized against
    * @throws InterruptedException
    * @throws ExecutionException
    */
-  static BlockRealMatrix processFiles(List<String> mosDepthResultFiles, Set<String> ucscRegions,
-                                      String tmpRawFile, int threads,
-                                      Logger log) throws InterruptedException, ExecutionException {
+  static NormalizedResult processFiles(List<String> mosDepthResultFiles, Set<String> ucscRegions,
+                                       String tmpRawFile, int threads,
+                                       Logger log) throws InterruptedException, ExecutionException {
     if (mosDepthResultFiles.isEmpty()) {
       String err = "No input files provided";
       log.severe(err);
@@ -80,14 +97,15 @@ class MosdepthUtils {
    * @param ucscRegions only these regions will be used
    * @param threads number of threads to use when loading
    * @param log
-   * @return normalized {@link DenseMatrix64F} holding all input files
+   * @return normalized {@link BlockRealMatrix} holding all input files, and the per-sample medians
+   *         it was normalized against
    * @throws InterruptedException
    * @throws ExecutionException
    */
 
-  private static BlockRealMatrix loadAndNormalizeData(List<String> mosDepthResultFiles,
-                                                      Set<String> ucscRegions, String tmpRawFile,
-                                                      int threads, Logger log) {
+  private static NormalizedResult loadAndNormalizeData(List<String> mosDepthResultFiles,
+                                                       Set<String> ucscRegions, String tmpRawFile,
+                                                       int threads, Logger log) {
 
     log.info("Initializing matrix to " + mosDepthResultFiles.size() + " columns and "
              + ucscRegions.size() + " rows");
@@ -146,8 +164,7 @@ class MosdepthUtils {
     FileOps.writeSerial(dm, tmpRawFile, log);
 
     log.info("Normalizing input matrix");
-    NormalizationOperations.foldChangeAndCenterRows(dm, log);
-    return dm;
+    return new NormalizedResult(dm, NormalizationOperations.foldChangeAndCenterRows(dm, log));
 
   }
 

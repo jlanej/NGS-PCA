@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.Options;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.MosdepthUtils.REGION_STRATEGY;
@@ -40,6 +41,8 @@ public class NGSPCA {
 
     log.info("Determining number of samples in " + inputMatrixFile);
 
+    // the column names of a supplied matrix are used as given: whatever produced it named the
+    // samples, and is in a better position than NGS-PCA to have named them correctly
     List<String> samples = FileOps.getFileHeader(inputMatrixFile, gz, delim, log);
     samples.remove(0);
     log.info("Found a total of " + samples.size() + " samples in " + inputMatrixFile);
@@ -69,15 +72,37 @@ public class NGSPCA {
       }
       if (normMatrix) {
         log.info("Normalizing input matrix");
+        // the medians are not reported here: NGS-PCA did not choose the rows of a supplied matrix,
+        // so it cannot say they are the autosomal, exclusion-filtered bins that make the median
+        // mean what a reader of that file would take it to mean
         NormalizationOperations.foldChangeAndCenterRows(dm, log);
       }
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
-      log.info("Loading existing serialized file " + tmpNormDm);
-      dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
+      dm = readCachedMatrix(tmpNormDm, log);
     }
     computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
 
+  }
+
+  /**
+   * A serialized matrix that cannot be read back is what an interrupted run leaves behind: the file
+   * exists, so the next run reuses it rather than rebuilding it, and the null it comes back as
+   * would otherwise surface later as something unrelated to the real problem
+   *
+   * @param file the serialized matrix to read
+   * @param log
+   * @return the matrix it holds
+   */
+  private static BlockRealMatrix readCachedMatrix(String file, Logger log) {
+    log.info("Loading existing serialized file " + file);
+    BlockRealMatrix dm = (BlockRealMatrix) FileOps.readSerial(file, log);
+    if (dm == null) {
+      throw new IllegalStateException("Unable to read " + file
+                                      + " - an interrupted run can leave it incomplete; re-run with --"
+                                      + CmdLine.OVERWRITE_ARG + " to rebuild it");
+    }
+    return dm;
   }
 
   /**
@@ -99,7 +124,8 @@ public class NGSPCA {
   private static void runMosdepth(String input, String outputDir, String bedExclude,
                                   REGION_STRATEGY regionStrategy, int numPcs, int niters,
                                   int numOversamples, int sampleAt, int randomSeed,
-                                  boolean overwrite, int threads, DISTRIBUTION d,
+                                  boolean overwrite, int threads, String sampleSuffix,
+                                  DISTRIBUTION d,
                                   Logger log) throws InterruptedException, ExecutionException,
                                               IOException {
     new File(outputDir).mkdirs();
@@ -130,10 +156,11 @@ public class NGSPCA {
       log.info("Detected " + mosDepthResultFiles.size() + " mosdepth input files in " + input);
     }
     // parse sample names from files
-    List<String> samples = mosDepthResultFiles.stream()
-                                              .map(f -> FileOps.stripDirectoryAndExtension(f,
-                                                                                           MosdepthUtils.MOSDEPTH_BED_EXT))
-                                              .collect(Collectors.toList());
+    List<String> samples = SampleNames.resolve(mosDepthResultFiles.stream()
+                                                                  .map(f -> FileOps.stripDirectoryAndExtension(f,
+                                                                                                               MosdepthUtils.MOSDEPTH_BED_EXT))
+                                                                  .collect(Collectors.toList()),
+                                               sampleSuffix, log);
 
     // load ucsc regions to use
 
@@ -153,18 +180,26 @@ public class NGSPCA {
     String tmpRawDm = Paths.get(outputDir, "tmp.raw.ser.gz").toString();
     // Store the temporary input matrix
     String tmpNormDm = Paths.get(outputDir, "tmp.mat.ser.gz").toString();
+    // Report the medians normalization computed, for tools that normalize against them too
+    String medianDm = Paths.get(outputDir, CoverageMedians.AUTOSOMAL_FILE).toString();
 
     // populate input matrix and normalize
     BlockRealMatrix dm;
     if (!FileOps.fileExists(tmpNormDm) || overwrite) {
-      dm = MosdepthUtils.processFiles(mosDepthResultFiles, new HashSet<String>(regions), tmpRawDm,
-                                      threads, log);
+      MosdepthUtils.NormalizedResult normalized = MosdepthUtils.processFiles(mosDepthResultFiles,
+                                                                             new HashSet<String>(regions),
+                                                                             tmpRawDm, threads,
+                                                                             log);
+      dm = normalized.matrix;
+      CoverageMedians.write(medianDm, samples, normalized.columnMedians, regions.size(), log);
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
-      System.out.print("Loading");
-      System.err.print("Loading");
-      log.info("Loading existing serialized file " + tmpNormDm);
-      dm = (BlockRealMatrix) FileOps.readSerial(tmpNormDm, log);
+      dm = readCachedMatrix(tmpNormDm, log);
+      if (!FileOps.fileExists(medianDm)) {
+        // the medians come from reading the mosdepth files, which reusing the matrix skips
+        log.warning("Reused " + tmpNormDm + ", so " + medianDm + " was not written - re-run with --"
+                    + CmdLine.OVERWRITE_ARG + " to produce it");
+      }
     }
     //    String inputMatrix = Paths.get(outputDir, "svd.norm.input.txt").toString();
     //    log.info("Writing to " + inputMatrix);
@@ -206,9 +241,15 @@ public class NGSPCA {
 
   public static void main(String[] args) {
     Logger log = Logger.getLogger(NGSPCA.class.getName());
-    CommandLine cmd = CmdLine.generateCommandLine(log, CmdLine.generateOptions(), args);
-    if (cmd == null || cmd.hasOption(CmdLine.HELP)) {
-      CmdLine.printHelp(log, CmdLine.generateOptions());
+    Options options = CmdLine.generateOptions();
+    if (CmdLine.isHelpRequested(args)) {
+      // asking for the usage message is not a failure
+      CmdLine.printHelp(log, options);
+      return;
+    }
+    CommandLine cmd = CmdLine.generateCommandLine(log, options, args);
+    if (cmd == null) {
+      CmdLine.printHelp(log, options);
       System.exit(1);
     }
 
@@ -237,19 +278,31 @@ public class NGSPCA {
                                                                CmdLine.DEFAULT_DISTRIBUTION.toString()));
       String bedExclude = cmd.getOptionValue(CmdLine.EXCLUDE_BED_FILE,
                                              CmdLine.DEFAULT_EXCLUDE_BED_FILE);
+      String sampleSuffix = cmd.getOptionValue(CmdLine.SAMPLE_SUFFIX_ARG,
+                                               CmdLine.DEFAULT_SAMPLE_SUFFIX);
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
+        if (sampleSuffix != null) {
+          // it does nothing here, and a flag that quietly does nothing is what the same flag
+          // refuses to be when it matches no mosdepth file name
+          log.warning("--" + CmdLine.SAMPLE_SUFFIX_ARG + " does not apply to --"
+                      + CmdLine.MATRIX_INPUT_ARG
+                      + " input, whose column names are used as they are");
+        }
         runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
                        cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, log);
       } else {
         runMosdepth(input, outputDir, bedExclude, REGION_STRATEGY.AUTOSOMAL, numPcs, niters,
                     numOversamples, sampleAt, randomSeed, cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                    threads, d, log);
+                    threads, sampleSuffix, d, log);
       }
     } catch (Exception e) {
       log.log(Level.SEVERE, "an exception was thrown", e);
       log.severe("An exception occurred while running\nFeel free to open an issue at https://github.com/PankratzLab/NGS-PCA after reviewing the help message below");
-      CmdLine.printHelp(log, CmdLine.generateOptions());
+      CmdLine.printHelp(log, options);
+      // a run that produced no results must not report success - a workflow engine or job array
+      // has nothing else to go on
+      System.exit(1);
     }
   }
 }
