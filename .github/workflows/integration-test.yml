@@ -436,9 +436,9 @@ jobs:
             # Skip empty lines
             [ -z "$expected_md5" ] && continue
 
-            # Check svd.* output files and distribution_comparison.txt
+            # Check svd.* output files, the per-sample median table, and distribution_comparison.txt
             case "$filepath" in
-              ./exampleOutput_1000G_chr1/svd.*|./exampleOutput_1000G_chr1/distribution_comparison.txt)
+              ./exampleOutput_1000G_chr1/svd.*|./exampleOutput_1000G_chr1/autosomal.median.txt|./exampleOutput_1000G_chr1/distribution_comparison.txt)
                 CHECKED=$((CHECKED + 1))
                 filename=$(basename "$filepath")
                 test_file="./test_output/$filename"
@@ -515,7 +515,7 @@ jobs:
         run: |
           echo "Verifying NGS-PCA Docker output files..."
           FAILED=0
-          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt; do
+          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt autosomal.median.txt; do
             if [ -f "test_output_docker/$f" ]; then
               echo "FOUND: $f"
             else
