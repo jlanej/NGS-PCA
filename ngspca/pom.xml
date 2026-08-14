@@ -40,9 +40,11 @@
     	<version>2.6</version>
     </dependency>
     <dependency>
+    	<!-- reference implementation for ThinQRTest only; not shipped -->
     	<groupId>gov.nist.math</groupId>
     	<artifactId>jama</artifactId>
     	<version>1.0.3</version>
+    	<scope>test</scope>
     </dependency>
   </dependencies>
   <properties>

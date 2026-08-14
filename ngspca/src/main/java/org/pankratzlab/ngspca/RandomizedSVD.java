@@ -17,8 +17,6 @@ import org.apache.commons.math3.linear.MatrixUtils;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.linear.SingularValueDecomposition;
 import org.apache.commons.math3.random.MersenneTwister;
-import Jama.Matrix;
-import Jama.QRDecomposition;
 
 public class RandomizedSVD {
 
@@ -117,20 +115,16 @@ public class RandomizedSVD {
     for (int i = 0; i < niters; i++) {
       log.info("Subspace iteration: " + Integer.toString(i));
       log.info("Y QR decomp");
-      QRDecomposition qr = new QRDecomposition(new Matrix(Y.getData()));
-      log.info("Converting to RealMatrix");
-      Y = MatrixUtils.createRealMatrix(qr.getQ().getArray());
+      Y = ThinQR.orthonormalBasis(Y);
       log.info("Computing A Y cross prod");
       RealMatrix Z = A_t.multiply(Y);
       log.info("Z QR decomp");
-      Z = MatrixUtils.createRealMatrix(new QRDecomposition(new Matrix(Z.getData())).getQ()
-                                                                                   .getArray());
+      Z = ThinQR.orthonormalBasis(Z);
       log.info("A %*% Z");
       Y = A.multiply(Z);
     }
 
-    RealMatrix Q = MatrixUtils.createRealMatrix(new QRDecomposition(new Matrix(Y.getData())).getQ()
-                                                                                            .getArray());
+    RealMatrix Q = ThinQR.orthonormalBasis(Y);
     log.info("Q^T %*% A");
     RealMatrix B = Q.transpose().multiply(A);
     log.info("SVD of reduced matrix");
