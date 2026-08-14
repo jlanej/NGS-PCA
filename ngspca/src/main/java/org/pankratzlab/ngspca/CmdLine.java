@@ -39,7 +39,7 @@ class CmdLine {
   static final String DEFAULT_SAMPLE_SUFFIX = null;
   static final DISTRIBUTION DEFAULT_DISTRIBUTION = DISTRIBUTION.UNIFORM;
 
-  static final int DEFAULT_THREADS = 4;
+  static final int DEFAULT_THREADS = 24;
 
   static final String HELP = "help";
 
@@ -86,7 +86,9 @@ class CmdLine {
                                     .desc("""
                                           Number of threads to utilize, both when loading data and \
                                           in the parallel steps of the decomposition. Set this to \
-                                          the cores your job was allocated. Default is \
+                                          the cores your job was allocated - the default suits a \
+                                          node, not a workstation, and asking for more than are \
+                                          available is reported. Default is \
                                           %d""".formatted(DEFAULT_THREADS))
                                     .required(false).build();
 

@@ -283,6 +283,14 @@ public class NGSPCA {
                                              CmdLine.DEFAULT_EXCLUDE_BED_FILE);
       String sampleSuffix = cmd.getOptionValue(CmdLine.SAMPLE_SUFFIX_ARG,
                                                CmdLine.DEFAULT_SAMPLE_SUFFIX);
+      int available = Runtime.getRuntime().availableProcessors();
+      if (threads > available) {
+        // the default is sized for a cluster node, so on anything smaller it is worth saying that
+        // the threads asked for do not exist rather than quietly oversubscribing
+        log.warning(threads + " threads requested but only " + available
+                    + " are available to this process - it will run, contending with itself; pass --"
+                    + CmdLine.NUM_THREADS_ARG + " " + available + " to match the cores it has");
+      }
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
         if (sampleSuffix != null) {
           // it does nothing here, and a flag that quietly does nothing is what the same flag
