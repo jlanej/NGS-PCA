@@ -187,14 +187,19 @@ visible in the file itself. The value is **not** floored — a sample reported a
 near zero is an empty or failed input, and is logged as a warning.
 
 The file is written as soon as normalization finishes, before the SVD, so it
-survives a run that fails or is killed later. A re-run that reuses a cached
-`tmp.mat.ser.gz` recomputes it from `tmp.raw.ser.gz` rather than re-reading the
-mosdepth files, so an existing output directory can be topped up cheaply.
+survives a run that fails or is killed later.
 
-With `-matrix -normalizeMatrix` the same medians are written to
-`matrix.median.txt` under the column name `MEDIAN`: the rows of a supplied matrix
-were not chosen here, so NGS-PCA cannot assert they are autosomal and
-exclusion-filtered.
+It is written only on a run that reads the mosdepth files. A re-run that reuses a
+cached `tmp.mat.ser.gz` skips normalization altogether, so it neither writes the
+table nor refreshes one already there — which matters if you change
+`-sampleSuffix` between runs against the same output directory, since the PC
+table is rewritten every run and the two would then no longer agree. Pass
+`-overwrite`, or write to a fresh directory.
+
+`-matrix` does not produce the table at all, with or without `-normalizeMatrix`.
+The rows of a supplied matrix were not chosen here, so NGS-PCA cannot say they
+are the autosomal, exclusion-filtered bins that make the median mean what a
+reader of this file would take it to mean.
 
 ### Sample identifiers
 

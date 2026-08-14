@@ -1,10 +1,7 @@
 package org.pankratzlab.ngspca;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.util.List;
@@ -26,16 +23,10 @@ import java.util.logging.Logger;
 class CoverageMedians {
 
   /**
-   * Written when NGS-PCA selected the regions itself, so the rows are known to be autosomal and
-   * exclusion-filtered
+   * Written only where NGS-PCA selected the regions itself, so the rows are known to be autosomal
+   * and exclusion-filtered
    */
   static final String AUTOSOMAL_FILE = "autosomal.median.txt";
-
-  /**
-   * Written for a user-supplied {@link CmdLine#MATRIX_INPUT_ARG}, whose rows NGS-PCA cannot vouch
-   * for
-   */
-  static final String MATRIX_FILE = "matrix.median.txt";
 
   /**
    * Median across autosomal bins that survived the exclusion bed - what depth-based association
@@ -43,46 +34,12 @@ class CoverageMedians {
    */
   static final String AUTOSOMAL_COLUMN = "AUTO_HQ_median";
 
-  /**
-   * Median across whatever rows the input matrix held - deliberately not
-   * {@link #AUTOSOMAL_COLUMN}, since NGS-PCA did not choose those rows
-   */
-  static final String MATRIX_COLUMN = "MEDIAN";
-
   private CoverageMedians() {
 
   }
 
   /**
-   * A median table is only reusable if it still names the samples this run is naming, since it has
-   * to join to the PC table written beside it. {@link CmdLine#SAMPLE_SUFFIX_ARG} changes those
-   * names without changing anything the medians are computed from, so "the file is already there"
-   * is not enough on its own.
-   *
-   * @param file an existing median table
-   * @param samples sample identifiers, in matrix column order
-   * @param log
-   * @return whether the table names exactly these samples, in this order
-   */
-  static boolean namesSamples(String file, List<String> samples, Logger log) {
-    try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-      reader.readLine();
-      for (String sample : samples) {
-        String line = reader.readLine();
-        if (line == null || !sample.equals(line.split("\t", 2)[0])) {
-          return false;
-        }
-      }
-      return reader.readLine() == null;
-    } catch (IOException e) {
-      log.log(Level.WARNING, "unable to read " + file, e);
-      return false;
-    }
-  }
-
-  /**
    * @param file write the table here
-   * @param valueColumn name of the median column, which states what the rows of the matrix were
    * @param samples sample identifiers, in matrix column order - the same identifiers written to
    *          svd.samples.txt and svd.pcs.txt, so the tables join
    * @param medians per-sample medians, in matrix column order
@@ -90,15 +47,14 @@ class CoverageMedians {
    *          table records what it was derived from
    * @param log
    */
-  static void write(String file, String valueColumn, List<String> samples, double[] medians,
-                    int numBins, Logger log) {
+  static void write(String file, List<String> samples, double[] medians, int numBins, Logger log) {
     if (samples.size() != medians.length) {
       throw new IllegalArgumentException("Invalid number of medians (" + medians.length
                                          + ") for " + samples.size() + " samples");
     }
     int flagged = 0;
     try (PrintWriter writer = new PrintWriter(new File(file))) {
-      writer.println("SAMPLE\t" + valueColumn + "\tN_BINS");
+      writer.println("SAMPLE\t" + AUTOSOMAL_COLUMN + "\tN_BINS");
       for (int i = 0; i < samples.size(); i++) {
         // catches NaN as well as zero and negative medians
         if (!(medians[i] > NormalizationOperations.MIN_DEPTH)) {
