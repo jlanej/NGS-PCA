@@ -137,7 +137,7 @@ java -Xmx1800G -jar ngspca/target/ngspca-0.02-SNAPSHOT.jar \
 | `-oversample` | Oversampling parameter; improves the approximation. At least 10 is recommended. | 200 |
 | `-distribution` | Distribution for the initial random matrix: `UNIFORM` or `GAUSSIAN`. | UNIFORM |
 | `-randomSeed` | Random seed for reproducibility. | 42 |
-| `-threads` | Threads for loading mosdepth files. | 4 |
+| `-threads` | Threads for loading mosdepth files and for the parallel steps of the decomposition. Set to the cores your job was allocated. | 4 |
 | `-bedExclude` | BED file of regions to exclude before PCA. | — |
 | `-sampleEvery` | Keep every *n*-th bin (0 or 1 = use all bins). | 1 |
 | `-sampleSuffix` | Literal suffix to remove from every sample name, e.g. `.by1000.` (see [Sample identifiers](#sample-identifiers)). | — |

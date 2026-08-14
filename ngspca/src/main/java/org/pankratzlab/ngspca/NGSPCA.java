@@ -29,7 +29,7 @@ public class NGSPCA {
   private static void runInputMatrix(String inputMatrixFile, String outputDir, int numPcs,
                                      int niters, int numOversamples, int randomSeed,
                                      boolean overwrite, boolean normMatrix, DISTRIBUTION d,
-                                     Logger log) throws InterruptedException, ExecutionException,
+                                     int threads, Logger log) throws InterruptedException, ExecutionException,
                                                  IOException {
     new File(outputDir).mkdirs();
 
@@ -81,7 +81,8 @@ public class NGSPCA {
     } else {
       dm = readCachedMatrix(tmpNormDm, log);
     }
-    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
+    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d,
+               threads);
 
   }
 
@@ -207,18 +208,20 @@ public class NGSPCA {
     //    RandomizedSVD.dumpMatrix(inputMatrix, dm, "BIN", samples.toArray(new String[samples.size()]),
     //                             regions.toArray(new String[regions.size()]), false, log);
 
-    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d);
+    computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d,
+               threads);
   }
 
   static void computeSVD(String outputDir, int numPcs, int niters, int numOversamples,
                          int randomSeed, Logger log, List<String> samples, List<String> regions,
-                         BlockRealMatrix dm, DISTRIBUTION d) {
+                         BlockRealMatrix dm, DISTRIBUTION d, int threads) {
     RandomizedSVD svd = new RandomizedSVD(samples, regions, log);
 
     log.info("Oversampling set to: " + numOversamples);
     log.info("Subspace iterations set to: " + niters);
     log.info("Random seed set to: " + randomSeed);
-    svd.fit(dm, numPcs, niters, numOversamples, randomSeed, d);
+    log.info("Decomposition threads set to: " + threads);
+    svd.fit(dm, numPcs, niters, numOversamples, randomSeed, d, threads);
     // perform SVD
 
     String pcs = Paths.get(outputDir, "svd.pcs.txt").toString();
@@ -290,7 +293,7 @@ public class NGSPCA {
         }
         runInputMatrix(input, outputDir, numPcs, niters, numOversamples, randomSeed,
                        cmd.hasOption(CmdLine.OVERWRITE_ARG),
-                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, log);
+                       cmd.hasOption(CmdLine.NORM_MATRIX_INPUT_ARG), d, threads, log);
       } else {
         runMosdepth(input, outputDir, bedExclude, REGION_STRATEGY.AUTOSOMAL, numPcs, niters,
                     numOversamples, sampleAt, randomSeed, cmd.hasOption(CmdLine.OVERWRITE_ARG),
