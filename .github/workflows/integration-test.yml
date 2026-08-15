@@ -667,3 +667,79 @@ jobs:
             exit 1
           fi
           echo "Wide-orientation test passed — all $CHECKED output checksums match expected values."
+
+  upstream-parity:
+    # Builds PankratzLab/NGS-PCA at the commit this fork diverged from, runs both on the same
+    # input, and requires no difference. Nothing is recorded: both sides run on this runner, so
+    # the comparison carries no assumption about platform or JVM, which a committed checksum does.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UPSTREAM_SHA: 2ffbcfc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build this branch
+        working-directory: ngspca
+        run: mvn -B package --file pom.xml -DskipTests
+
+      - name: Build upstream at ${{ env.UPSTREAM_SHA }}
+        run: |
+          git clone --quiet https://github.com/PankratzLab/NGS-PCA.git "${RUNNER_TEMP}/upstream"
+          git -C "${RUNNER_TEMP}/upstream" checkout --quiet "${UPSTREAM_SHA}"
+          cd "${RUNNER_TEMP}/upstream/ngspca" && mvn -B package --file pom.xml -DskipTests
+
+      - name: Run both on the same input, in both orientations
+        run: |
+          set -euo pipefail
+          MINE="ngspca/target/ngspca-0.02-SNAPSHOT.jar"
+          THEIRS="${RUNNER_TEMP}/upstream/ngspca/target/ngspca-0.02-SNAPSHOT.jar"
+          FAILED=0
+
+          # wide is samples > bins, which transposes; tall is the other branch
+          for shape in "wide:300:200" "tall:100:400"; do
+            name="${shape%%:*}"; rest="${shape#*:}"; samples="${rest%%:*}"; bins="${rest##*:}"
+            work="${RUNNER_TEMP}/parity_${name}"
+            ./example/wideOrientation/generate.sh "${work}/mosdepth" "$samples" "$bins"
+            ls -1 "${work}/mosdepth"/*.regions.bed.gz | sort > "${work}/manifest.txt"
+
+            # a manifest, not a directory: upstream does not sort its directory listing, so the
+            # sample order - and with it the answer - would differ for a reason unrelated to this
+            for side in theirs mine; do
+              jar="$THEIRS"; [ "$side" = mine ] && jar="$MINE"
+              mkdir -p "${work}/${side}"
+              # the trailing slash matters: upstream builds output paths by concatenation
+              java -Xmx3g -jar "$jar" -input "${work}/manifest.txt" -outputDir "${work}/${side}/" \
+                -numPC 10 -iters 5 -oversample 50 -randomSeed 42 -threads 4 > "${work}/${side}.log" 2>&1
+            done
+
+            echo "--- ${name}: ${samples} samples x ${bins} bins ---"
+            for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt; do
+              if cmp -s "${work}/theirs/$f" "${work}/mine/$f"; then
+                echo "  IDENTICAL: $f"
+              else
+                echo "  DIFFERS:   $f"
+                FAILED=1
+              fi
+            done
+          done
+
+          # the wide shape must actually have transposed, or it tested the same path twice
+          grep -q "Treating the input as transposed" "${RUNNER_TEMP}/parity_wide/mine.log" \
+            || { echo "::error::the wide shape did not transpose - both shapes tested one path"; exit 1; }
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::output differs from upstream ${UPSTREAM_SHA} - this fork has changed the estimator"
+            exit 1
+          fi
+          echo "Identical to upstream ${UPSTREAM_SHA} in both orientations."

@@ -18,6 +18,9 @@
 # so every awk produces the same bytes: the products stay under 2^53, where a
 # double is exact, and no float is ever rounded for printing.
 #
+# Either orientation is allowed: the upstream-parity job wants both, and the wide fixture proves
+# which one it got from the run log rather than from the shape of its input.
+#
 # Usage: generate.sh <outputDir> [samples] [bins]
 # =============================================================================
 
@@ -26,11 +29,6 @@ set -euo pipefail
 OUT_DIR="${1:?usage: generate.sh <outputDir> [samples] [bins]}"
 SAMPLES="${2:-2000}"
 BINS="${3:-1500}"
-
-if [ "$BINS" -ge "$SAMPLES" ]; then
-  echo "ERROR: this fixture exists to test bins < samples; got $BINS bins, $SAMPLES samples" >&2
-  exit 1
-fi
 
 mkdir -p "$OUT_DIR"
 
