@@ -22,7 +22,17 @@ every awk emits the same bytes.
 that `numPC + oversample` exceeds `BlockRealMatrix.BLOCK_SIZE`, which is what makes
 `ParallelMultiply` divide the products rather than fall back to the serial path.
 
-**These checksums are x86_64.** As with `example/1000G.chr1.md5`, the numeric outputs depend on the
+The job also re-runs with `-threads 1` and requires byte-identical output. That takes the serial
+fallback in both `ParallelMultiply` and `ThinQR`, so it compares the parallel paths against the
+serial ones — and unlike the checksums it holds on any platform, because it compares two runs on
+the same machine rather than against a recorded value.
+
+**These checksums are x86_64, and were taken from a CI run.** They have to be: values that pass
+through `Math.log` depend on the platform, and a reference generated anywhere else does not match
+the runner. What makes them trustworthy is not where they came from but that this branch is
+bit-identical to upstream `PankratzLab@2ffbcfc` in this orientation on a single machine — a
+property that does not depend on which machine, so these are the runner's rounding of an output
+already checked against upstream. As with `example/1000G.chr1.md5`, the numeric outputs depend on the
 platform's `Math.log`, which differs between x86_64 and aarch64 — so they reproduce on CI and on a
 cluster, and not on an Apple Silicon workstation. `svd.bins.txt`, `svd.samples.txt` and
 `autosomal.median.txt` match everywhere, since none of them involves a transcendental.

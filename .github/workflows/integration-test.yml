@@ -608,6 +608,33 @@ jobs:
           grep -q "neither transpose is materialised" "${RUNNER_TEMP}/run.log" \
             || { echo "::error::a transpose of the cohort matrix was materialised - the memory fix regressed"; exit 1; }
 
+      - name: Re-run single-threaded and compare
+        working-directory: example/wideOrientation
+        run: |
+          # -threads 1 takes the serial fallback in both ParallelMultiply and ThinQR, so this
+          # compares the parallel paths against the serial ones on whatever machine is running.
+          # Unlike the checksums below it holds on any platform, and it is the check that covers
+          # the parallelism itself rather than the estimator.
+          java -Xmx4g -jar ../../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+            -input "${RUNNER_TEMP}/wide" \
+            -outputDir "${RUNNER_TEMP}/wide_serial" \
+            -numPC 20 -iters 5 -oversample 60 -randomSeed 42 -threads 1 -distribution UNIFORM > /dev/null 2>&1
+
+          FAILED=0
+          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt autosomal.median.txt; do
+            if cmp -s "${RUNNER_TEMP}/wide_output/$f" "${RUNNER_TEMP}/wide_serial/$f"; then
+              echo "MATCH: $f"
+            else
+              echo "DIFFERS between 1 and 4 threads: $f"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::output depends on thread count - dividing the work is changing the values"
+            exit 1
+          fi
+          echo "Thread-independence confirmed."
+
       - name: Verify output checksums
         working-directory: example/wideOrientation
         run: |
