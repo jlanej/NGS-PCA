@@ -87,9 +87,8 @@ public class NGSPCA {
   }
 
   /**
-   * A serialized matrix that cannot be read back is what an interrupted run leaves behind: the file
-   * exists, so the next run reuses it rather than rebuilding it, and the null it comes back as
-   * would otherwise surface later as something unrelated to the real problem
+   * Fails loudly rather than passing a null on: an interrupted run leaves a file that exists but
+   * will not read back, and a stale one describes a different run
    *
    * @param file the serialized matrix to read
    * @param log
@@ -304,8 +303,6 @@ public class NGSPCA {
       }
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
         if (sampleSuffix != null) {
-          // it does nothing here, and a flag that quietly does nothing is what the same flag
-          // refuses to be when it matches no mosdepth file name
           log.warning("--" + CmdLine.SAMPLE_SUFFIX_ARG + " does not apply to --"
                       + CmdLine.MATRIX_INPUT_ARG
                       + " input, whose column names are used as they are");

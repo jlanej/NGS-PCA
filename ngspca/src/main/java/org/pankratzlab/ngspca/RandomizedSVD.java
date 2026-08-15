@@ -109,12 +109,8 @@ public class RandomizedSVD {
     rsvd[1] = MatrixUtils.createRealMatrix(numComponents, 1);
     rsvd[2] = MatrixUtils.createRealMatrix(A.getColumnDimension(), numComponents);
 
-    // The decomposition wants a matrix with at least as many rows as columns, and its transpose.
-    // Neither is materialised: every product either one appears in is taken through the matrix as
-    // given, using (X^T M)^T = M^T X. At cohort scale each transpose would be a second copy of
-    // something measured in hundreds of gigabytes, and taking the product this way is also faster,
-    // since dividing the large matrix by column-blocks yields far more tasks than dividing the
-    // small one does.
+    // Neither transpose is materialised; every product goes through A as given, via
+    // (X^T M)^T = M^T X. At cohort scale each would be a second copy of hundreds of gigabytes.
     // the wide-orientation job greps for this line: it is how CI knows that orientation was
     // reached, which the output does not show. Rewording it means rewording that job too.
     if (transpose) {

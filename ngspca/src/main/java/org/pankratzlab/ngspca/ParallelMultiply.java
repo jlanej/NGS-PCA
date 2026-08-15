@@ -18,8 +18,8 @@ import org.apache.commons.math3.linear.RealMatrix;
  * cut on {@link BlockRealMatrix#BLOCK_SIZE}: narrower ones would read the whole left hand matrix
  * once per slice instead of once per block-column, trading arithmetic for memory traffic.
  * <p>
- * That bounds the parallelism at one task per output block-column, so a wider decomposition - a
- * larger {@code numPC} plus oversampling - is what makes more threads useful here.
+ * Parallelism is one task per output block-column, so it follows the width of the right hand
+ * matrix.
  */
 class ParallelMultiply {
 
