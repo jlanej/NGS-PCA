@@ -190,10 +190,15 @@ public class RandomizedSVD {
    * result costs a fraction of what transposing M would.
    */
   private static RealMatrix transposeProduct(BlockRealMatrix m, RealMatrix x, ForkJoinPool pool) {
-    // through a BlockRealMatrix regardless of what x is, so the product takes the blocked path it
-    // would have taken with M^T on the left
-    BlockRealMatrix xt = new BlockRealMatrix(x.transpose().getData());
-    return ParallelMultiply.multiply(xt, m, pool).transpose();
+    RealMatrix xt = x.transpose();
+    // the product is taken blocked, which needs a BlockRealMatrix on the left. Note this is not
+    // what the old M^T X did when X was small: MatrixUtils hands back an Array2DRowRealMatrix below
+    // 4096 entries, commons-math dispatches on that, and the two sum in a different order. Values
+    // differ in the last digits there. No cohort is that small - X is a dimension of the matrix by
+    // numPC plus oversampling - so the difference is accepted rather than worked around.
+    BlockRealMatrix blocked = xt instanceof BlockRealMatrix block ? block
+                                                                  : new BlockRealMatrix(xt.getData());
+    return ParallelMultiply.multiply(blocked, m, pool).transpose();
   }
 
   /**
