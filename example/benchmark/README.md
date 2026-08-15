@@ -22,28 +22,47 @@ run left at the small defaults says little about one at `-numPC 500`.
 The script refuses to report timings unless both builds produced identical output. A speed
 comparison between two different answers is not a comparison.
 
-## A recorded run
+## A recorded sweep
 
-Apple M-series laptop, 10 cores, JDK 21, `-Xmx6g`, 1,200 samples × 3,000 bins, width 500,
-`-threads 8`:
+`sweep.sh` crosses the two axes that decide which regime a run is in. Apple M-series laptop,
+10 cores, JDK 21, `-Xmx4g`, `-threads 8`, against upstream `2ffbcfc`. Output identical to upstream
+on every row.
 
-| build | seconds | peak RSS MB |
-|---|---|---|
-| upstream `2ffbcfc` | 44 | 1075 |
-| this build | 11 | 1002 |
+| shape | samples x bins | width | upstream s | this build s | upstream MB | this build MB | speedup |
+|---|---|---|---|---|---|---|---|
+| bins>samples | 1200 x 3000 | 500 | 43 | 11 | 802 | 776 | 3.9x |
+| samples>bins | 3000 x 1200 | 500 | 43 | 11 | 839 | 774 | 3.9x |
+| near-square | 2000 x 2000 | 500 | 44 | 13 | 805 | 775 | 3.4x |
+| samples>bins | 3000 x 1200 | 100 | 7 | 5 | 754 | 748 | 1.4x |
+| bins>samples | 1200 x 3000 | 100 | 7 | 5 | 745 | 748 | 1.4x |
 
-Output identical across all five files.
+**Width drives the speedup; orientation does not.** 3.9x at width 500 in both orientations, 1.4x at
+width 100 in both. That is what the arithmetic says should happen: the QR costs (rows + columns)
+times width squared, and rows + columns does not change when the matrix is transposed, so neither
+does the cost. Widening the decomposition makes the QR a larger share of the run, and the QR is
+what got faster. A run at `-numPC 500` is in the top group; one at `-numPC 20` is in the bottom.
+
+**The memory column matches the copy count, at this scale.** Removing both transposes takes peak
+from several copies of the matrix to one, and how many were removed depends on the orientation:
+
+| shape | matrix | copies removed | predicted | observed |
+|---|---|---|---|---|
+| bins>samples | 28.8 MB | 1 (upstream held A and A_t) | 28.8 MB | 26 MB |
+| samples>bins | 28.8 MB | 2 (upstream also held the shape transpose) | 57.6 MB | 65 MB |
+| near-square | 32.0 MB | 1 | 32.0 MB | 30 MB |
+
+Three shapes, each within about 10% of prediction, and twice the saving in the orientation where
+upstream held three copies rather than two. That is a check on the model behind the 314 GB to
+157 GB claim, not a measurement of it - the saving is proportional to the matrix, and here the
+matrix is 29 MB against 750 MB of JVM and htsjdk baseline. The two narrow rows show nothing, which
+is expected: those runs last five seconds and peak RSS never gets far from the baseline.
 
 ## What these numbers do not show
 
-**The memory saving is invisible here.** Removing both transposes takes peak from two copies of the
-cohort matrix to one, but at this shape that matrix is 29 MB against a gigabyte of JVM and htsjdk
-overhead, so it disappears into the noise. The saving is proportional to the matrix — it is worth
-157 GB at 140k × 140k and nothing at all here. Only a real cohort will show it.
-
-**Nor does the speed generalise.** 4× at this shape is mostly the QR, which dominates when the
-matrix is small relative to the width. At near-square cohort shapes the products dominate instead,
-and the speedup there is bounded by how many block-columns the right hand matrix has.
+**They do not generalise by size.** The largest matrix here is 32 MB; a production one is 157 GB. Nothing in
+this table constrains what happens when the products stop fitting in cache, and at cohort shapes
+the products dominate the QR, with a speedup bounded by how many block-columns the right hand
+matrix has rather than by how many cores were asked for.
 
 The measurement worth having is a single instrumented production run — `/usr/bin/time -v` on a real
 cohort — checked against those two claims.
