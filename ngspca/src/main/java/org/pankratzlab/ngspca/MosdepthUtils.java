@@ -96,7 +96,9 @@ class MosdepthUtils {
 
   private static NormalizedResult loadAndNormalizeData(List<String> mosDepthResultFiles,
                                                        Set<String> ucscRegions, String tmpRawFile,
-                                                       int threads, Logger log) {
+                                                       int threads,
+                                                       Logger log) throws InterruptedException,
+                                                                   ExecutionException {
 
     log.info("Initializing matrix to " + mosDepthResultFiles.size() + " columns and "
              + ucscRegions.size() + " rows");
@@ -122,7 +124,9 @@ class MosdepthUtils {
     executor.submit(producerTask);
 
     for (String mosDepthResultFile : mosDepthResultFiles) {
-      try {
+      // a file that will not load must stop the run: the column it was going to fill is still the
+      // zeros the matrix was allocated with, and a fabricated empty sample moves every sample's PCs
+      {
         BedRegionResult current = blockingQueue.take().get();
         String file = mosDepthResultFiles.get(col);
         if (!file.equals(current.file())) {
@@ -141,12 +145,6 @@ class MosdepthUtils {
           log.info("Memory used: "
                    + (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()));
         }
-      } catch (InterruptedException e) {
-        log.severe(e.getMessage());
-
-      } catch (ExecutionException e) {
-        log.severe(e.getMessage());
-
       }
 
     }

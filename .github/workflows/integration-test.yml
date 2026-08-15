@@ -425,6 +425,71 @@ jobs:
             test_output_gaussian/ \
             test_output/distribution_comparison.txt
 
+      - name: Verify the exit-code contract
+        working-directory: example
+        run: |
+          JAR=../ngspca/target/ngspca-0.02-SNAPSHOT.jar
+
+          # asking for usage is not a failure
+          java -jar "$JAR" --help > /dev/null 2>&1 \
+            || { echo "::error::--help should exit 0"; exit 1; }
+
+          # a run that produces nothing must not report success: a scheduler has nothing else to go on
+          if java -jar "$JAR" -input /nonexistent/path -outputDir "${RUNNER_TEMP}/nowhere" > /dev/null 2>&1; then
+            echo "::error::a run with no input should exit non-zero"
+            exit 1
+          fi
+
+          # nor should one that cannot read a mosdepth file partway through. The first file has to be
+          # readable, or region selection fails before the loading loop is reached - and the loading
+          # loop is the path that used to log the failure, leave the column at zero and exit 0
+          ./wideOrientation/generate.sh "${RUNNER_TEMP}/badinput" 3 200
+          echo "not gzip" > "${RUNNER_TEMP}/badinput/sample00003.regions.bed.gz"
+          if java -jar "$JAR" -input "${RUNNER_TEMP}/badinput" -outputDir "${RUNNER_TEMP}/badout" \
+               -numPC 2 -iters 2 -oversample 10 > /dev/null 2>&1; then
+            echo "::error::a run that could not read one of its mosdepth files should exit non-zero"
+            exit 1
+          fi
+          echo "Exit-code contract holds."
+
+      - name: Run the --matrix input path
+        working-directory: example
+        run: |
+          # the matrix path has its own reading, sample naming and normalization, and is not
+          # exercised anywhere else in CI
+          MATRIX="${RUNNER_TEMP}/matrix.txt"
+          awk 'BEGIN {
+            printf "REGION"
+            for (s = 1; s <= 30; s++) printf "\tsample%02d", s
+            printf "\n"
+            seed = 7
+            for (r = 0; r < 200; r++) {
+              printf "chr1:%d-%d", r * 1000 + 1, r * 1000 + 1000
+              for (s = 1; s <= 30; s++) {
+                seed = (seed * 16807) % 2147483647
+                v = seed % 4000 + 200
+                printf "\t%d.%02d", int(v / 100), v % 100
+              }
+              printf "\n"
+            }
+          }' > "$MATRIX"
+
+          java -jar ../ngspca/target/ngspca-0.02-SNAPSHOT.jar \
+            -input "$MATRIX" -matrix -normalizeMatrix \
+            -outputDir "${RUNNER_TEMP}/matrix_out" \
+            -numPC 5 -iters 5 -oversample 20 -randomSeed 42 -threads 4
+
+          for f in svd.pcs.txt svd.loadings.txt svd.singularvalues.txt svd.bins.txt svd.samples.txt; do
+            [ -s "${RUNNER_TEMP}/matrix_out/$f" ] \
+              || { echo "::error::--matrix run did not write $f"; exit 1; }
+          done
+          # medians are deliberately not reported for a supplied matrix: NGS-PCA did not choose its rows
+          [ ! -f "${RUNNER_TEMP}/matrix_out/autosomal.median.txt" ] \
+            || { echo "::error::--matrix run wrote a median table it cannot vouch for"; exit 1; }
+          [ "$(wc -l < "${RUNNER_TEMP}/matrix_out/svd.samples.txt")" -eq 30 ] \
+            || { echo "::error::--matrix run did not name 30 samples"; exit 1; }
+          echo "--matrix path OK."
+
       - name: Verify output MD5 checksums
         working-directory: example
         run: |
@@ -601,12 +666,14 @@ jobs:
             -distribution UNIFORM 2>&1 | tee "${RUNNER_TEMP}/run.log"
 
           # the point of the fixture: fail loudly if it stopped exercising the branch it exists for
-          # asserted because neither shows up in the output: identical checksums would not tell
-          # us the orientation was reached, nor that no full copy of the matrix was made
+          # asserted because it does not show up in the output: identical checksums would not tell
+          # us the transposed orientation was reached at all
           grep -q "Treating the input as transposed" "${RUNNER_TEMP}/run.log" \
             || { echo "::error::input was not treated as transposed - this fixture no longer tests what it is for"; exit 1; }
-          grep -q "neither transpose is materialised" "${RUNNER_TEMP}/run.log" \
-            || { echo "::error::a transpose of the cohort matrix was materialised - the memory fix regressed"; exit 1; }
+          # note: that no transpose of the cohort matrix is materialised is NOT checked here. The
+          # line that used to be grepped for sat outside every conditional and so always matched -
+          # reinstating A.transpose() left the job green. Nothing observable from a shell proves an
+          # allocation did not happen; it is held by review and by ParallelMultiplyTest instead.
 
       - name: Re-run single-threaded and compare
         working-directory: example/wideOrientation
@@ -706,7 +773,12 @@ jobs:
           THEIRS="${RUNNER_TEMP}/upstream/ngspca/target/ngspca-0.02-SNAPSHOT.jar"
           FAILED=0
 
-          # wide is samples > bins, which transposes; tall is the other branch
+          # wide is samples > bins, which transposes; tall is the other branch.
+          # Keep both shapes large enough that numPC + oversample times a matrix dimension exceeds
+          # 4096 entries. Below that MatrixUtils hands back an Array2DRowRealMatrix, commons-math
+          # dispatches on the type, and this fork deliberately differs from upstream in the last
+          # digits - see RandomizedSVD.transposeProduct. Shrinking these for speed turns an accepted
+          # difference into a red build.
           for shape in "wide:300:200" "tall:100:400"; do
             name="${shape%%:*}"; rest="${shape#*:}"; samples="${rest%%:*}"; bins="${rest##*:}"
             work="${RUNNER_TEMP}/parity_${name}"

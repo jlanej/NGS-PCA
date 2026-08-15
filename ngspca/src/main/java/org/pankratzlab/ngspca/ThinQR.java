@@ -10,8 +10,8 @@ import org.apache.commons.math3.linear.RealMatrix;
 /**
  * Orthonormal basis for the columns of a tall matrix, by Householder QR.
  * <p>
- * This is the power iteration's inner step and the great majority of the work in
- * {@link RandomizedSVD#fit}. It is the thin Q that is wanted - m by n, not m by m - which rules out
+ * This is the power iteration's inner step, and was the whole cost of {@link RandomizedSVD#fit}
+ * before it was parallelised. It is the thin Q that is wanted - m by n, not m by m - which rules out
  * {@link org.apache.commons.math3.linear.QRDecomposition}, whose getQ() is m by m and so is not
  * representable at the row counts this is used for.
  * <p>
@@ -20,9 +20,6 @@ import org.apache.commons.math3.linear.RealMatrix;
  * rather than as rows of a row-major array, so the inner loops walk memory in order, and the
  * columns updated by each Householder step are independent of each other, so they are updated in
  * parallel. Both leave every value's arithmetic untouched.
- * <p>
- * Parallelism is bounded by the {@link ForkJoinPool} the caller supplies, so a run uses the cores
- * it was given rather than every core it can see.
  */
 class ThinQR {
 
@@ -32,7 +29,7 @@ class ThinQR {
 
   /**
    * @param matrix a matrix with at least as many rows as columns
-   * @param pool the column updates run here, and nowhere else
+   * @param pool the column updates run here
    * @return the thin Q of its QR decomposition, with the same dimensions
    */
   static RealMatrix orthonormalBasis(RealMatrix matrix, ForkJoinPool pool) {

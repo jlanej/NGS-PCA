@@ -18,8 +18,8 @@ import org.apache.commons.math3.linear.RealMatrix;
  * cut on {@link BlockRealMatrix#BLOCK_SIZE}: narrower ones would read the whole left hand matrix
  * once per slice instead of once per block-column, trading arithmetic for memory traffic.
  * <p>
- * That bounds the parallelism at one task per output block-column, so a wider decomposition - a
- * larger {@code numPC} plus oversampling - is what makes more threads useful here.
+ * Parallelism is one task per output block-column, so it follows the width of the right hand
+ * matrix.
  */
 class ParallelMultiply {
 
@@ -41,12 +41,25 @@ class ParallelMultiply {
     int rows = b.getRowDimension();
     int slices = (columns + BlockRealMatrix.BLOCK_SIZE - 1) / BlockRealMatrix.BLOCK_SIZE;
 
+    // getSubMatrix copies, so every slice in flight is a block-column of b held in full. Run them
+    // in waves inside a share of the heap rather than one per thread, or peak memory would scale
+    // with -threads: at three million bins a slice is 1.2 GB, and 120 of them at once is not a
+    // trade anyone asked for. Where slices are small - the usual case - a wave holds every slice
+    // and this is one pass, as before.
+    long sliceBytes = (long) rows * BlockRealMatrix.BLOCK_SIZE * Double.BYTES;
+    int perWave = (int) Math.max(1, Math.min(slices,
+                                             Runtime.getRuntime().maxMemory() / 8 / sliceBytes));
+
     RealMatrix[] parts = new RealMatrix[slices];
-    pool.submit(() -> IntStream.range(0, slices).parallel().forEach(slice -> {
-      int from = slice * BlockRealMatrix.BLOCK_SIZE;
-      int to = Math.min(from + BlockRealMatrix.BLOCK_SIZE, columns) - 1;
-      parts[slice] = a.multiply(b.getSubMatrix(0, rows - 1, from, to));
-    })).join();
+    for (int waveStart = 0; waveStart < slices; waveStart += perWave) {
+      int from = waveStart;
+      int to = Math.min(waveStart + perWave, slices);
+      pool.submit(() -> IntStream.range(from, to).parallel().forEach(slice -> {
+        int columnFrom = slice * BlockRealMatrix.BLOCK_SIZE;
+        int columnTo = Math.min(columnFrom + BlockRealMatrix.BLOCK_SIZE, columns) - 1;
+        parts[slice] = a.multiply(b.getSubMatrix(0, rows - 1, columnFrom, columnTo));
+      })).join();
+    }
 
     BlockRealMatrix product = new BlockRealMatrix(a.getRowDimension(), columns);
     for (int slice = 0; slice < slices; slice++) {

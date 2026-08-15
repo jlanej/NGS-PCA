@@ -79,7 +79,7 @@ public class NGSPCA {
       }
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
-      dm = readCachedMatrix(tmpNormDm, log);
+      dm = readCachedMatrix(tmpNormDm, regions.size(), samples.size(), log);
     }
     computeSVD(outputDir, numPcs, niters, numOversamples, randomSeed, log, samples, regions, dm, d,
                threads);
@@ -87,21 +87,30 @@ public class NGSPCA {
   }
 
   /**
-   * A serialized matrix that cannot be read back is what an interrupted run leaves behind: the file
-   * exists, so the next run reuses it rather than rebuilding it, and the null it comes back as
-   * would otherwise surface later as something unrelated to the real problem
+   * Fails loudly rather than passing a null on: an interrupted run leaves a file that exists but
+   * will not read back, and a stale one describes a different run
    *
    * @param file the serialized matrix to read
    * @param log
    * @return the matrix it holds
    */
-  private static BlockRealMatrix readCachedMatrix(String file, Logger log) {
+  private static BlockRealMatrix readCachedMatrix(String file, int regions, int samples,
+                                                 Logger log) {
     log.info("Loading existing serialized file " + file);
     BlockRealMatrix dm = (BlockRealMatrix) FileOps.readSerial(file, log);
     if (dm == null) {
       throw new IllegalStateException("Unable to read " + file
                                       + " - an interrupted run can leave it incomplete; re-run with --"
                                       + CmdLine.OVERWRITE_ARG + " to rebuild it");
+    }
+    // a cache from a run with different -sampleEvery or different inputs is the wrong matrix, and
+    // the outputs would carry this run's region and sample labels over it
+    if (dm.getRowDimension() != regions || dm.getColumnDimension() != samples) {
+      throw new IllegalStateException(file + " holds a " + dm.getRowDimension() + " by "
+                                      + dm.getColumnDimension() + " matrix but this run has "
+                                      + regions + " regions and " + samples
+                                      + " samples - it is from a different run; re-run with --"
+                                      + CmdLine.OVERWRITE_ARG);
     }
     return dm;
   }
@@ -195,12 +204,13 @@ public class NGSPCA {
       CoverageMedians.write(medianDm, samples, normalized.columnMedians(), regions.size(), log);
       FileOps.writeSerial(dm, tmpNormDm, log);
     } else {
-      dm = readCachedMatrix(tmpNormDm, log);
-      if (!FileOps.fileExists(medianDm)) {
-        // the medians come from reading the mosdepth files, which reusing the matrix skips
-        log.warning("Reused " + tmpNormDm + ", so " + medianDm + " was not written - re-run with --"
-                    + CmdLine.OVERWRITE_ARG + " to produce it");
-      }
+      dm = readCachedMatrix(tmpNormDm, regions.size(), samples.size(), log);
+      // the medians come from reading the mosdepth files, which reusing the matrix skips. Warn
+      // whether or not one is there: a file left by an earlier run with different sample naming
+      // still exists, and no longer joins to the PC table this run is about to write
+      log.warning("Reused " + tmpNormDm + ", so " + medianDm
+                  + " was not refreshed - anything there is from an earlier run; re-run with --"
+                  + CmdLine.OVERWRITE_ARG + " if the inputs or sample naming have changed");
     }
     //    String inputMatrix = Paths.get(outputDir, "svd.norm.input.txt").toString();
     //    log.info("Writing to " + inputMatrix);
@@ -293,8 +303,6 @@ public class NGSPCA {
       }
       if (cmd.hasOption(CmdLine.MATRIX_INPUT_ARG)) {
         if (sampleSuffix != null) {
-          // it does nothing here, and a flag that quietly does nothing is what the same flag
-          // refuses to be when it matches no mosdepth file name
           log.warning("--" + CmdLine.SAMPLE_SUFFIX_ARG + " does not apply to --"
                       + CmdLine.MATRIX_INPUT_ARG
                       + " input, whose column names are used as they are");
