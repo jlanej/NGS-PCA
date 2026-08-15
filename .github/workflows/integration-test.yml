@@ -601,12 +601,14 @@ jobs:
             -distribution UNIFORM 2>&1 | tee "${RUNNER_TEMP}/run.log"
 
           # the point of the fixture: fail loudly if it stopped exercising the branch it exists for
-          # asserted because neither shows up in the output: identical checksums would not tell
-          # us the orientation was reached, nor that no full copy of the matrix was made
+          # asserted because it does not show up in the output: identical checksums would not tell
+          # us the transposed orientation was reached at all
           grep -q "Treating the input as transposed" "${RUNNER_TEMP}/run.log" \
             || { echo "::error::input was not treated as transposed - this fixture no longer tests what it is for"; exit 1; }
-          grep -q "neither transpose is materialised" "${RUNNER_TEMP}/run.log" \
-            || { echo "::error::a transpose of the cohort matrix was materialised - the memory fix regressed"; exit 1; }
+          # note: that no transpose of the cohort matrix is materialised is NOT checked here. The
+          # line that used to be grepped for sat outside every conditional and so always matched -
+          # reinstating A.transpose() left the job green. Nothing observable from a shell proves an
+          # allocation did not happen; it is held by review and by ParallelMultiplyTest instead.
 
       - name: Re-run single-threaded and compare
         working-directory: example/wideOrientation
