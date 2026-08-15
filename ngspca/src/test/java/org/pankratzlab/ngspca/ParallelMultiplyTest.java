@@ -73,6 +73,38 @@ public class ParallelMultiplyTest extends TestCase {
   }
 
   /**
+   * RandomizedSVD takes M^T X as (X^T M)^T so that M^T is never allocated, which is only sound if
+   * the two are the same to the bit. Multiplication commutes exactly in IEEE 754 and both forms
+   * sum over the same shared index in the same block order, but that is an argument, and this is
+   * the check.
+   */
+  public void testTransposedProductMatchesAMaterialisedTranspose() {
+    for (int[] shape : new int[][] {{300, 200, 104}, {97, 311, 53}, {520, 97, 208}}) {
+      int rows = shape[0], columns = shape[1], k = shape[2];
+      BlockRealMatrix m = random(rows, columns, 31);
+      BlockRealMatrix x = random(rows, k, 37);
+
+      ForkJoinPool pool = new ForkJoinPool(4);
+      try {
+        RealMatrix materialised = ParallelMultiply.multiply(m.transpose(), x, pool);
+        RealMatrix withoutTranspose = ParallelMultiply.multiply(new BlockRealMatrix(x.transpose()
+                                                                                     .getData()),
+                                                                m, pool)
+                                                      .transpose();
+        for (int row = 0; row < columns; row++) {
+          for (int column = 0; column < k; column++) {
+            assertEquals("entry " + row + "," + column,
+                         Double.doubleToRawLongBits(materialised.getEntry(row, column)),
+                         Double.doubleToRawLongBits(withoutTranspose.getEntry(row, column)));
+          }
+        }
+      } finally {
+        pool.shutdown();
+      }
+    }
+  }
+
+  /**
    * The right hand matrix is whatever the previous step returned, which for a small one is an
    * Array2DRowRealMatrix rather than a BlockRealMatrix
    */

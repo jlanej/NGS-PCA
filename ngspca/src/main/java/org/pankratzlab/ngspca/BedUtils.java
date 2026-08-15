@@ -66,22 +66,10 @@ public class BedUtils {
   }
 
   /**
-   * Stores the results of loading a bed file to memory
+   * The features one bed file yielded, alongside the file they came from so a consumer taking them
+   * off a queue can check it got the one it expected. The list is held as given, not copied.
    */
-  static class BedRegionResult {
-
-    final String file;
-    final List<BEDFeature> features;
-
-    /**
-     * @param file
-     * @param features
-     */
-    private BedRegionResult(String file, List<BEDFeature> features) {
-      super();
-      this.file = file;
-      this.features = features;
-    }
+  static record BedRegionResult(String file, List<BEDFeature> features) {
 
   }
 

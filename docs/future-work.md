@@ -2,28 +2,41 @@
 
 This document summarizes known areas for improvement in NGS-PCA, covering performance, scientific correctness, and code quality. Contributions are welcome.
 
+**Where the time goes.** Measured on a synthetic cohort of 200,000 bins by 200 samples, 20 PCs,
+200 oversamples, 10 power iterations, 8 threads — before and after the decomposition was
+parallelised:
+
+| phase | before | after |
+|---|---|---|
+| load mosdepth files | 7 s | 7 s |
+| serialize raw matrix (gzip) | 14 s | 14 s |
+| normalize | 14 s | 14 s |
+| power iterations | 2540 s | 50 s |
+| finish (QᵀA, SVD, write) | — | 7 s |
+| **total** | **2899 s** | **95 s** |
+
+Every output byte-identical between the two. The decomposition is no longer the whole cost, so
+serialization and normalization — items 3 and 5 below — are now roughly 15% each rather than the
+rounding errors they were, and are the next things worth measuring. Note that this cohort is
+tall and thin; at the near-square shapes of a large cohort the matrix products dominate further
+and the QR matters less.
+
 ---
 
-## 1. Eliminate Jama dependency in Randomized SVD (performance)
+## 1. Eliminate Jama dependency in Randomized SVD — DONE
 
-**File:** `ngspca/src/main/java/org/pankratzlab/ngspca/RandomizedSVD.java`
+Jama is gone from the shipped jar; it remains a test-scope dependency, as the reference
+`ThinQR` is held to bit-for-bit.
 
-The subspace iteration loop currently converts between Apache Commons Math `RealMatrix` objects and Jama `Matrix` objects in order to perform QR decomposition:
+**Not by the route this item recommended.** Commons Math's `QRDecomposition.getQ()` returns an
+m by m matrix, and the Q wanted here is the thin one — at 140,000 bins the square Q is not
+representable, let alone cheap. `ThinQR` performs Jama's Householder arithmetic, operation for
+operation, over column-major storage with the independent per-column updates run in parallel.
+Measured at 140000 x 500: 8.2 s against Jama's 992.6 s, every one of 70,000,000 entries identical.
 
-```java
-QRDecomposition qr = new QRDecomposition(new Matrix(Y.getData()));
-Y = MatrixUtils.createRealMatrix(qr.getQ().getArray());
-```
-
-Each conversion allocates a full `double[][]` copy of the matrix. With large datasets (e.g., 10⁶ genomic bins × 300-column subspace) and many iterations (10–40), this causes repeated GC pressure and memory bloat.
-
-**Recommended fix:** Use Apache Commons Math's own `QRDecomposition` directly, avoiding all intermediate array copies:
-
-```java
-org.apache.commons.math3.linear.QRDecomposition qr =
-    new org.apache.commons.math3.linear.QRDecomposition(Y);
-Y = qr.getQ();
-```
+The array copies this item blamed were not the cost — they measured at a tenth of a second.
+Jama's row-major layout was, because each inner loop strides across as many separate arrays as
+the matrix has rows, and that penalty grows with row count rather than staying proportional.
 
 ---
 
@@ -71,19 +84,43 @@ Additionally, consider using Commons Math matrix visitor patterns (`RealMatrixCh
 
 ---
 
-## 4. Avoid deep-copy transposition for large matrices (memory)
+## 4. Avoid deep-copy transposition for large matrices — DONE
 
-**File:** `ngspca/src/main/java/org/pankratzlab/ngspca/RandomizedSVD.java`
+Neither transpose is materialised any more. `fit` needs a matrix with at least as many rows as
+columns and also its transpose; it now holds only the matrix as given, and takes every product
+either one appears in through it, using `Mᵀ X = (Xᵀ M)ᵀ`. Only the narrow matrix and the result are
+transposed, and both are a fraction of the size.
 
-The algorithm caches an explicit transposed copy of the input matrix:
+Peak drops from two full copies to one — roughly 314 GB to 157 GB for a 140k by 140k cohort — in
+both orientations, where before the second copy was the cached `A_t` with more bins than samples
+and the shape transpose with more samples than bins.
 
-```java
-BlockRealMatrix A_t = A.transpose();
-```
+It is also faster, which was not the point but is the larger effect: 2.0 s against 3.7 s for one
+product at 8000 by 8000. Dividing the large matrix by column-blocks yields hundreds of tasks where
+dividing the narrow one yielded ten, so the ceiling in item 4b does not bind on this product.
 
-Apache Commons Math's `transpose()` physically allocates and copies all data into a new matrix. For large inputs (e.g., 10⁶ bins × 2000 samples), this roughly doubles RAM usage.
+The identity holds to the bit — multiplication commutes exactly in IEEE 754 and both forms sum over
+the same shared index in the same block order — and is pinned by
+`ParallelMultiplyTest.testTransposedProductMatchesAMaterialisedTranspose`. Verified end to end in
+both orientations, including against upstream `PankratzLab@2ffbcfc`.
 
-**Recommended fix:** If memory is a concern, compute `A.transpose().multiply(...)` inline and rely on any library-level optimization, or implement a lazy transpose wrapper (`RealMatrix` subclass) that translates row/column indices without copying data.
+---
+
+## 4b. Parallelism ceiling in the matrix products (performance)
+
+**File:** `ngspca/src/main/java/org/pankratzlab/ngspca/ParallelMultiply.java`
+
+The products are divided by output block-column, which bounds them at `ceil(k / 52)` concurrent
+tasks, where `k` is `-numPC` plus `-oversample` — ten for `-numPC 500 -oversample 0`. Beyond that
+a node's remaining cores go unused during the phase that dominates a large run.
+
+Dividing by rows of the left-hand matrix instead would lift the ceiling, but `BlockRealMatrix`
+keeps `blocks`, `blockRows` and `blockColumns` private, so it needs either reflection or a
+row-slice that does not copy — see item 4. Raising `-oversample` also raises the ceiling, at the
+cost of a wider decomposition.
+
+`QᵀA` after the loop is still serial. It is one product against the full matrix where the loop
+runs twenty, and parallelising it means slicing the large matrix rather than the small one.
 
 ---
 

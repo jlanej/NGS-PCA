@@ -55,21 +55,12 @@ class MosdepthUtils {
   }
 
   /**
-   * Stores a normalized matrix alongside the per-sample medians it was normalized against
+   * A normalized matrix and the per-sample medians it was normalized against, which the
+   * normalization computes on its way through and would otherwise discard. Both are held as given,
+   * not copied.
    */
-  static class NormalizedResult {
+  static record NormalizedResult(BlockRealMatrix matrix, double[] columnMedians) {
 
-    final BlockRealMatrix matrix;
-
-    /**
-     * per-column (per-sample) median of the raw input, in matrix column order
-     */
-    final double[] columnMedians;
-
-    private NormalizedResult(BlockRealMatrix matrix, double[] columnMedians) {
-      this.matrix = matrix;
-      this.columnMedians = columnMedians;
-    }
   }
 
   /**
@@ -134,16 +125,16 @@ class MosdepthUtils {
       try {
         BedRegionResult current = blockingQueue.take().get();
         String file = mosDepthResultFiles.get(col);
-        if (!file.equals(current.file)) {
+        if (!file.equals(current.file())) {
           throw new IllegalArgumentException("Invalid file returned, expecting " + file
-                                             + " and got " + current.file);
+                                             + " and got " + current.file());
         }
-        if (current.features.size() != ucscRegions.size()) {
+        if (current.features().size() != ucscRegions.size()) {
           throw new IllegalArgumentException("Invalid number of features from " + file
                                              + "\n expected" + ucscRegions.size() + " and got "
-                                             + current.features.size());
+                                             + current.features().size());
         }
-        setColumnData(dm, col, mosDepthResultFile, current.features, log);
+        setColumnData(dm, col, mosDepthResultFile, current.features(), log);
         col++;
         if (col == 1 || col % 200 == 0) {
           log.info("Set data for file " + Integer.toString(col));
