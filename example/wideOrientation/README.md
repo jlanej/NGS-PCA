@@ -32,7 +32,14 @@ through `Math.log` depend on the platform, and a reference generated anywhere el
 the runner. What makes them trustworthy is not where they came from but that this branch is
 bit-identical to upstream `PankratzLab@2ffbcfc` in this orientation on a single machine — a
 property that does not depend on which machine, so these are the runner's rounding of an output
-already checked against upstream. As with `example/1000G.chr1.md5`, the numeric outputs depend on the
+already checked against upstream.
+
+**Do not regenerate them under emulation.** The first version of this file was produced by running
+the amd64 container on an aarch64 workstation, and three of the six did not match the runner. The
+JVM was not the difference — it was Temurin 21.0.11, current at the time — which leaves qemu.
+Emulation is faithful enough to have reproduced `1000G.chr1.md5` exactly, which is what made this
+look safe; it is not faithful enough here. Take these from a CI run, or from real x86_64
+hardware. As with `example/1000G.chr1.md5`, the numeric outputs depend on the
 platform's `Math.log`, which differs between x86_64 and aarch64 — so they reproduce on CI and on a
 cluster, and not on an Apple Silicon workstation. `svd.bins.txt`, `svd.samples.txt` and
 `autosomal.median.txt` match everywhere, since none of them involves a transcendental.
