@@ -115,10 +115,14 @@ public class RandomizedSVD {
     // something measured in hundreds of gigabytes, and taking the product this way is also faster,
     // since dividing the large matrix by column-blocks yields far more tasks than dividing the
     // small one does.
+    // these two lines are asserted by the wide-orientation job in .github/workflows: they are how
+    // CI knows the orientation was reached and no transpose was built, neither of which shows in
+    // the output. Rewording them means rewording that job too.
     if (transpose) {
       log.info("Treating the input as transposed, since row N < column N");
       n = A.getRowDimension();
     }
+    log.info("Taking products through the input; neither transpose is materialised");
 
     log.info("Selecting randomized Q using distribution " + d.toString());
 

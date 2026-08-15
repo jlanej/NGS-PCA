@@ -601,10 +601,12 @@ jobs:
             -distribution UNIFORM 2>&1 | tee "${RUNNER_TEMP}/run.log"
 
           # the point of the fixture: fail loudly if it stopped exercising the branch it exists for
-          grep -q "Transposing, since" "${RUNNER_TEMP}/run.log" \
-            || { echo "::error::input was not transposed - this fixture no longer tests what it is for"; exit 1; }
-          grep -q "Using the input as A_t" "${RUNNER_TEMP}/run.log" \
-            || { echo "::error::A_t was copied rather than reused - the transposed path regressed"; exit 1; }
+          # asserted because neither shows up in the output: identical checksums would not tell
+          # us the orientation was reached, nor that no full copy of the matrix was made
+          grep -q "Treating the input as transposed" "${RUNNER_TEMP}/run.log" \
+            || { echo "::error::input was not treated as transposed - this fixture no longer tests what it is for"; exit 1; }
+          grep -q "neither transpose is materialised" "${RUNNER_TEMP}/run.log" \
+            || { echo "::error::a transpose of the cohort matrix was materialised - the memory fix regressed"; exit 1; }
 
       - name: Verify output checksums
         working-directory: example/wideOrientation
