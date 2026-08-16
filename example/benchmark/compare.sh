@@ -17,8 +17,8 @@
 #
 # THREADS, HEAP, NUMPC and OVERSAMPLE come from the environment. NUMPC plus
 # OVERSAMPLE is the width of the decomposition, and it is what the QR cost
-# scales with (rows x width squared) - so a run left at the small default says
-# little about a production one at -numPC 500.
+# scales with ((rows + columns) x width squared) - so a run left at the small
+# default says little about a production one at -numPC 500.
 #
 # To get a baseline jar for upstream:
 #   git clone https://github.com/PankratzLab/NGS-PCA.git /tmp/upstream

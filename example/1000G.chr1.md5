@@ -22,7 +22,5 @@ e5aec6500485d0d46f19c28780e41dbc  ./exampleMosdepth_1000G_chr1/NA19795.alt_bwame
 e09c0dac18f6896e5c00260ec55a933a  ./exampleOutput_1000G_chr1/svd.singularvalues.txt
 7595d249b1dd86a21f7d56e894a5fc89  ./exampleOutput_1000G_chr1/autosomal.median.txt
 deb7110ca864a28ebcdd883616cb81bb  ./exampleOutput_1000G_chr1/distribution_comparison.txt
-0625133779f0a91da292f184ed767e2e  ./exampleOutput_1000G_chr1/tmp.mat.ser.gz
 2278e3270437287d4bf2e7c200a05adb  ./exampleMosdepth_1000G_chr1/HG03650.alt_bwamem_GRCh38DH.20150718.PJL.low_coverage.cram.by1000.regions.bed.gz
-805058d51de9ce326278f2cd80ab0037  ./exampleOutput_1000G_chr1/tmp.raw.ser.gz
 d1fce401c5fac3ea155f3857fa923bc0  ./input.files.txt

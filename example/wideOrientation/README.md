@@ -33,7 +33,4 @@ not regenerate them under emulation: the amd64 container on an aarch64 host repr
 `example/1000G.chr1.md5` exactly but got three of these six wrong. `svd.bins.txt`,
 `svd.samples.txt` and `autosomal.median.txt` match everywhere - no transcendentals. What makes the
 values trustworthy is that this branch is bit-identical to upstream `PankratzLab@2ffbcfc` on a
-single machine, which the `upstream-parity` CI job now checks directly. As with `example/1000G.chr1.md5`, the numeric outputs depend on the
-platform's `Math.log`, which differs between x86_64 and aarch64 — so they reproduce on CI and on a
-cluster, and not on an Apple Silicon workstation. `svd.bins.txt`, `svd.samples.txt` and
-`autosomal.median.txt` match everywhere, since none of them involves a transcendental.
+single machine, which the `upstream-parity` CI job now checks directly.

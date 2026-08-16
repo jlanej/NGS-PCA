@@ -8,9 +8,9 @@
 #
 #   orientation  bins > samples takes one code path, samples > bins the other
 #                (the input is transposed, and the products go the other way)
-#   width        numPC + oversample. The QR costs rows x width squared and the
-#                products cost bins x samples x width, so widening the
-#                decomposition shifts which one dominates
+#   width        numPC + oversample. The QR costs (rows + columns) x width
+#                squared and the products cost bins x samples x width, so
+#                widening the decomposition shifts which one dominates
 #
 # The shapes below cross those two. They are small enough to run on a laptop in
 # a few minutes, which also means none of them is a production cohort - see the

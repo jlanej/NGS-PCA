@@ -4,7 +4,8 @@ This document summarizes known areas for improvement in NGS-PCA, covering perfor
 
 **Where the time goes.** Measured on a synthetic cohort of 200,000 bins by 200 samples, 20 PCs,
 200 oversamples, 10 power iterations, 8 threads — before and after the decomposition was
-parallelised:
+parallelised. The before run logged no separate finish phase; that cell is the remainder of its
+total:
 
 | phase | before | after |
 |---|---|---|
@@ -12,7 +13,7 @@ parallelised:
 | serialize raw matrix (gzip) | 14 s | 14 s |
 | normalize | 14 s | 14 s |
 | power iterations | 2540 s | 50 s |
-| finish (QᵀA, SVD, write) | — | 7 s |
+| finish (QᵀA, SVD, write) | 324 s | 7 s |
 | **total** | **2899 s** | **95 s** |
 
 Every output byte-identical between the two. The decomposition is no longer the whole cost, so
@@ -91,9 +92,10 @@ columns and also its transpose; it now holds only the matrix as given, and takes
 either one appears in through it, using `Mᵀ X = (Xᵀ M)ᵀ`. Only the narrow matrix and the result are
 transposed, and both are a fraction of the size.
 
-Peak drops from two full copies to one — roughly 314 GB to 157 GB for a 140k by 140k cohort — in
-both orientations, where before the second copy was the cached `A_t` with more bins than samples
-and the shape transpose with more samples than bins.
+Peak drops to a single copy of the matrix in both orientations. With more bins than samples that
+removes one copy, the cached `A_t` — roughly 314 GB to 157 GB for a 140k by 140k cohort. With
+more samples than bins it removes two, since the shape transpose was materialised first and `A_t`
+cached from it. `example/benchmark/README.md` measures both.
 
 It is also faster, which was not the point but is the larger effect: 2.0 s against 3.7 s for one
 product at 8000 by 8000. Dividing the large matrix by column-blocks yields hundreds of tasks where
@@ -110,17 +112,19 @@ both orientations, including against upstream `PankratzLab@2ffbcfc`.
 
 **File:** `ngspca/src/main/java/org/pankratzlab/ngspca/ParallelMultiply.java`
 
-The products are divided by output block-column, which bounds them at `ceil(k / 52)` concurrent
-tasks, where `k` is `-numPC` plus `-oversample` — ten for `-numPC 500 -oversample 0`. Beyond that
-a node's remaining cores go unused during the phase that dominates a large run.
+The products are divided by output block-column, so concurrency follows the width of the
+right-hand matrix. Each subspace iteration multiplies once in each direction: the product that
+takes the narrow matrix on the right is bounded at `ceil(k / 52)` tasks, where `k` is `-numPC`
+plus `-oversample` — five at the defaults, ten for `-numPC 500 -oversample 0` — while the other
+slices the cohort matrix and follows a cohort dimension, enough for any node. The two directions
+cost the same FLOPs, so roughly half the product work runs at the ceiling, and beyond `k / 52`
+threads the remaining cores are idle during that half. The one-off products — `A Ω` before the
+loop, `Qᵀ A` after it — split the same way, one on each side, with orientation deciding which.
 
 Dividing by rows of the left-hand matrix instead would lift the ceiling, but `BlockRealMatrix`
 keeps `blocks`, `blockRows` and `blockColumns` private, so it needs either reflection or a
 row-slice that does not copy — see item 4. Raising `-oversample` also raises the ceiling, at the
 cost of a wider decomposition.
-
-`QᵀA` after the loop is still serial. It is one product against the full matrix where the loop
-runs twenty, and parallelising it means slicing the large matrix rather than the small one.
 
 ---
 
