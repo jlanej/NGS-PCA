@@ -120,23 +120,19 @@ cost of a wider decomposition.
 
 ---
 
-## 5. I/O Memory Bloat: HTSJDK BEDFeature Instantiation (performance)
+## 5. I/O Memory Bloat: HTSJDK BEDFeature Instantiation (performance) — DONE
 
-**Files:** `ngspca/src/main/java/org/pankratzlab/ngspca/MosdepthUtils.java`, `ngspca/src/main/java/org/pankratzlab/ngspca/BedUtils.java`
+The coverage extraction no longer goes through htsjdk: `loadSpecificRegions` reads the gzip
+stream itself and returns one `double[]` per file rather than a `List` of three million
+`BEDFeature`s. `BedUtilsTest` pins the replacement to what `BEDCodec` produced — the 1-based
+keys, the fourth column, the skipped lines, bgzf content, and the refusal of content that is not
+gzip. Region selection from the first file still uses htsjdk, so the keys the filter matches
+against remain the codec's own.
 
-Coverage data from mosdepth output files is currently parsed using HTSJDK's `BEDFileReader`:
-
-```java
-BEDFileReader reader = new BEDFileReader(file, false);
-CloseableIterator<BEDFeature> iter = reader.iterator();
-List<BEDFeature> result = iter.stream()
-    .filter(bf -> ucscRegions.contains(getBedUCSC(bf)))
-    .collect(Collectors.toList());
-```
-
-A whole-genome BAM processed into 1 kb bins produces roughly 3 million lines. HTSJDK creates a heavy `BEDFeature` object for every single line. Processing a cohort with `threads = 4` instantiates ~12 million `BEDFeature` objects at any given moment just to extract the 4th column (coverage), generating immense garbage-collection (GC) pressure.
-
-**Recommended fix:** Because mosdepth outputs predictable, tab-delimited files, drop HTSJDK for the coverage extraction phase. Read the file iteratively with standard `BufferedReader` or `Files.lines()`, split by `\t`, and directly parse the 4th element as a double. This completely bypasses the creation of intermediate objects.
+Measured at 150 samples by 200,000 bins, 8 threads, `-Xmx4g`: loading drops from 7 s to 2 s and
+peak RSS from 4.0 GB to 1.6 GB, with every output byte-identical, serialized matrices included.
+The in-flight cost per queued file is now the bin count times eight bytes, so `-threads 24` no
+longer implies tens of gigabytes of feature objects at cohort scale.
 
 ---
 

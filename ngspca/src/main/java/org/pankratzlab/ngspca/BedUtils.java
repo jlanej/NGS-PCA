@@ -1,11 +1,19 @@
 package org.pankratzlab.ngspca;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPInputStream;
 import org.apache.commons.lang3.StringUtils;
 import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.samtools.util.Locatable;
@@ -46,30 +54,86 @@ public class BedUtils {
 
   }
 
+  private static final int BUFFER_BYTES = 1 << 16;
+
   /**
-   * TODO, currently not an index-based query. Reads all records and filters
-   * 
-   * @param file load {@link BEDFeature}s from this file
-   * @param ucscRegions {@link Set} of ucsc formatted regions to load
-   * @return
+   * Reads the file directly rather than through htsjdk: a cohort is up to hundreds of thousands of
+   * these files, and {@link BEDCodec} builds a {@link BEDFeature} per line only for the fourth
+   * column to be read off it. Equivalence with what the codec produced is pinned by
+   * {@code BedUtilsTest}: keys are contig:start+1-end, since tribble is 1-based inclusive where
+   * bed is 0-based half-open; the coverage is the fourth column exactly; and blank, {@code #},
+   * {@code track} and {@code browser} lines are skipped. The region list this filters against is
+   * still built by htsjdk from the first file, so a drift in key format fails the consumer's count
+   * check rather than misassigning rows.
+   *
+   * @param file mosdepth bed file to read
+   * @param ucscRegions only rows for these regions are kept
+   * @return the coverage column this file holds, in file order
    */
   static BedRegionResult loadSpecificRegions(String file, Set<String> ucscRegions) {
-    BEDFileReader reader = new BEDFileReader(file, false);
-    CloseableIterator<BEDFeature> iter = reader.iterator();
-    List<BEDFeature> result = iter.stream().filter(bf -> ucscRegions.contains(getBedUCSC(bf)))
-                                  .collect(Collectors.toList());
-    iter.close();
-    reader.close();
-
-    return new BedRegionResult(file, result);
-
+    double[] coverage = new double[ucscRegions.size()];
+    int matched = 0;
+    try (BufferedReader reader = open(file)) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.isEmpty() || line.charAt(0) == '#' || line.startsWith("track")
+            || line.startsWith("browser")) {
+          continue;
+        }
+        int t1 = line.indexOf('\t');
+        int t2 = line.indexOf('\t', t1 + 1);
+        int t3 = line.indexOf('\t', t2 + 1);
+        if (t1 < 0 || t2 < 0 || t3 < 0) {
+          throw new IllegalArgumentException("Invalid bed line in " + file + ": " + line);
+        }
+        String key;
+        try {
+          // parsed and re-printed rather than substringed, exactly as the codec normalised them
+          int start = Integer.parseInt(line, t1 + 1, t2, 10) + 1;
+          int end = Integer.parseInt(line, t2 + 1, t3, 10);
+          key = line.substring(0, t1) + ':' + start + '-' + end;
+        } catch (NumberFormatException nfe) {
+          throw new IllegalArgumentException("Invalid bed line in " + file + ": " + line, nfe);
+        }
+        if (ucscRegions.contains(key)) {
+          if (matched < coverage.length) {
+            int t4 = line.indexOf('\t', t3 + 1);
+            String value = t4 < 0 ? line.substring(t3 + 1) : line.substring(t3 + 1, t4);
+            try {
+              coverage[matched] = Double.parseDouble(value);
+            } catch (NumberFormatException nfe) {
+              throw new IllegalArgumentException("Invalid (non-numeric) coverage value in file "
+                                                 + file + " in row " + matched, nfe);
+            }
+          }
+          matched++;
+        }
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException("unable to read " + file, e);
+    }
+    return new BedRegionResult(file, coverage, matched);
   }
 
   /**
-   * The features one bed file yielded, alongside the file they came from so a consumer taking them
-   * off a queue can check it got the one it expected. The list is held as given, not copied.
+   * Buffered reader over the gzip file. Content that is not gzip fails here, as it did through
+   * htsjdk, which trusts the extension the same way.
    */
-  static record BedRegionResult(String file, List<BEDFeature> features) {
+  private static BufferedReader open(String file) throws IOException {
+    InputStream in = new GZIPInputStream(new BufferedInputStream(new FileInputStream(file),
+                                                                 BUFFER_BYTES),
+                                         BUFFER_BYTES);
+    return new BufferedReader(new InputStreamReader(in, StandardCharsets.ISO_8859_1),
+                              BUFFER_BYTES);
+  }
+
+  /**
+   * The coverage column one bed file yielded, in file order, alongside the file it came from so a
+   * consumer taking results off a queue can check it got the one it expected. {@code matched}
+   * counts every line whose region was asked for, including any beyond the expected count, so the
+   * consumer's count check sees duplicated regions rather than a silently truncated column.
+   */
+  static record BedRegionResult(String file, double[] coverage, int matched) {
 
   }
 
