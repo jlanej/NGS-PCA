@@ -41,21 +41,13 @@ the matrix has rows, and that penalty grows with row count rather than staying p
 
 ---
 
-## 2. Clarify median vs. mean centering in normalization (scientific)
+## 2. Clarify median vs. mean centering in normalization (scientific) — DONE
 
-**File:** `ngspca/src/main/java/org/pankratzlab/ngspca/NormalizationOperations.java`
-
-The row-centering step uses the **median** rather than the **mean**:
-
-```java
-private static void centerRowsToMedian(RealMatrix dm) { ... }
-```
-
-Standard PCA is defined in terms of deviations from the mean, so the resulting components do not correspond to the eigenvectors of the sample covariance matrix. The median-centering approach is a form of robust preprocessing that reduces the influence of coverage outliers, but this diverges from classical PCA.
-
-**Options:**
-- Switch to mean centering for standard, statistically interpretable PCA.
-- Keep median centering but clearly document that this is a robust variant and that the singular vectors do not strictly align with the covariance eigenvectors.
+Documented rather than changed: the README's overview now states that median centering makes this
+a robust variant of PCA whose components are not exactly the covariance eigenvectors, and suggests
+wording for methods text. Switching to mean centering would change every output and break parity
+with upstream for no clear scientific gain; if classical PCA is ever wanted, it belongs behind a
+flag.
 
 ---
 

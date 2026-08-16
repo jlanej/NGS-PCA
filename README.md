@@ -22,6 +22,13 @@ NGS-PCA computes PCs from sequencing coverage across fixed-width genomic bins. A
 2. **Normalization** — Within each sample, compute log₂ fold change relative to the sample's median bin coverage. Then center each bin to a median of zero across all samples.
 3. **Randomized SVD** — Approximate the truncated SVD using the randomized algorithm of [Halko, Martinsson, and Tropp (2011)](https://doi.org/10.1137/090771806), with the power iteration scheme of [Rokhlin, Szlam, and Tygert (2009)](https://doi.org/10.1137/080736417). The implementation is analogous to the [rSVD](https://github.com/erichson/rSVD) R package.
 
+> **A note on centering.** Step 2 centers each bin to a median of zero, not a mean of zero, so the
+> decomposition is a robust variant of PCA rather than the textbook one: the components are the
+> singular vectors of the median-centered matrix, not exactly the eigenvectors of the sample
+> covariance matrix. Median centering keeps a handful of outlier samples from dragging a bin's
+> center, which is the point. Methods text should say "PCA on median-centered log₂ fold change of
+> depth" rather than "PCA" alone.
+
 ## Prerequisites
 
 Install [mosdepth](https://github.com/brentp/mosdepth) (see [installation instructions](https://github.com/brentp/mosdepth#installation)).
