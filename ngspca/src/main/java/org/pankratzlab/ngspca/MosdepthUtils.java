@@ -8,13 +8,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.pankratzlab.ngspca.BedUtils.BEDOverlapDetector;
 import org.pankratzlab.ngspca.BedUtils.BedRegionResult;
-import htsjdk.tribble.bed.BEDFeature;
 
 /**
  * Process mosdepth bed files for use in PCA
@@ -133,12 +131,12 @@ class MosdepthUtils {
           throw new IllegalArgumentException("Invalid file returned, expecting " + file
                                              + " and got " + current.file());
         }
-        if (current.features().size() != ucscRegions.size()) {
+        if (current.matched() != ucscRegions.size()) {
           throw new IllegalArgumentException("Invalid number of features from " + file
                                              + "\n expected" + ucscRegions.size() + " and got "
-                                             + current.features().size());
+                                             + current.matched());
         }
-        setColumnData(dm, col, mosDepthResultFile, current.features(), log);
+        setColumnData(dm, col, current.coverage());
         col++;
         if (col == 1 || col % 200 == 0) {
           log.info("Set data for file " + Integer.toString(col));
@@ -157,21 +155,9 @@ class MosdepthUtils {
 
   }
 
-  private static void setColumnData(RealMatrix dm, int col, String inputFile,
-                                    List<BEDFeature> features, Logger log) {
-
-    for (int row = 0; row < features.size(); row++) {
-      // mosdepth coverage parsed to "name" by htsjdk
-      try {
-        //        dm.add(v)
-        //        dm.data
-        dm.addToEntry(row, col, Double.parseDouble(features.get(row).getName()));
-      } catch (NumberFormatException nfe) {
-        log.log(Level.SEVERE, "an exception was thrown", nfe);
-        throw new IllegalArgumentException("Invalid (non-numeric) coverage value in file "
-                                           + inputFile + " in  row " + row);
-      }
-
+  private static void setColumnData(RealMatrix dm, int col, double[] coverage) {
+    for (int row = 0; row < coverage.length; row++) {
+      dm.setEntry(row, col, coverage[row]);
     }
   }
 
