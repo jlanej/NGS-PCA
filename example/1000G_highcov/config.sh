@@ -67,9 +67,58 @@ PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 # Install Aspera Connect from https://www.ibm.com/products/aspera/downloads
 # or load it as an HPC module: module load aspera-connect
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data
-ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh}"
+#
+# CLIENT VERSION REQUIREMENT: fasp.sra.ebi.ac.uk now runs OpenSSH 8.7 and offers
+# only modern SSH transport algorithms:
+#   KEX  : curve25519-sha256(@libssh.org), ecdh-sha2-nistp{256,384,521},
+#          diffie-hellman-group-exchange-sha256   (all SHA-1 DH removed)
+#   MACs : umac-128-etm@, hmac-sha2-256-etm@, hmac-sha2-512-etm@  (ETM only)
+# ascp 3.9.x bundles a libssh2 that supports neither the AEAD ciphers (which
+# would make the MAC list moot) nor the -etm MACs, so its SSH handshake dies
+# during algorithm negotiation with:
+#   [libssh2] Failure Event: -5 - Unable to exchange encryption keys
+#   ascp: failed to authenticate, exiting.
+# That message is misleading — the transfer never reaches authentication, so
+# swapping the -i key file does NOT help. Upgrade to Aspera Connect 4.2.x.
+#
+# Run 'bash install_aspera.sh' to provision a current client plus the key into
+# WORK_DIR; the two blocks below then pick it up automatically.
+ASPERA_HOME="${ASPERA_HOME:-${WORK_DIR}/aspera}"
+
+# ascp binary: explicit override > work-dir install > whatever is on PATH.
+if [[ -z "${ASPERA_BIN:-}" ]]; then
+  if [[ -x "${ASPERA_HOME}/.aspera/connect/bin/ascp" ]]; then
+    ASPERA_BIN="${ASPERA_HOME}/.aspera/connect/bin/ascp"
+  else
+    ASPERA_BIN="ascp"
+  fi
+fi
+
+# Anonymous ENA key: explicit override > work-dir cache > a personal Connect
+# install. Connect releases after 4.1 no longer ship this file, so on a fresh
+# machine it is install_aspera.sh that puts it in the work-dir location.
+if [[ -z "${ASPERA_SSH_KEY:-}" ]]; then
+  if [[ -s "${ASPERA_HOME}/etc/asperaweb_id_dsa.openssh" ]]; then
+    ASPERA_SSH_KEY="${ASPERA_HOME}/etc/asperaweb_id_dsa.openssh"
+  else
+    ASPERA_SSH_KEY="${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh"
+  fi
+fi
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
+# Set USE_ASPERA=0 to skip ascp entirely (avoids ~2 doomed handshakes and a
+# screenful of FASP log noise per sample when the local client is too old).
+USE_ASPERA="${USE_ASPERA:-1}"
+
+# ── Non-Aspera download tuning ──────────────────────────────────────────────
+# ENA serves the same paths over HTTPS with Accept-Ranges: bytes, so a single
+# CRAM can be pulled as N concurrent range requests. Measured off-site, 8
+# streams ran ~3x a single stream; on a well-connected HPC node the gain is
+# usually larger. aria2c is preferred when present; otherwise the pipeline
+# falls back to parallel curl ranges, then to single-stream wget.
+DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-16}"
+# Base used to rewrite ftp:// manifest URLs for the HTTP download paths.
+ENA_HTTPS_BASE="${ENA_HTTPS_BASE:-https://ftp.sra.ebi.ac.uk}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
 ENA_ASPERA_USER="era-fasp@fasp.sra.ebi.ac.uk"
 EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"

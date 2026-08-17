@@ -17,7 +17,8 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | Stage | Script | What it does | SLURM type |
 |-------|--------|-------------|------------|
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
-| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera/wget → run mosdepth → remove CRAM | Array job (3,202 tasks) |
+| **0b** | `install_aspera.sh` | *Optional.* Provision a current `ascp` plus the anonymous ENA key into `$WORK_DIR`, then verify with a real transfer | Interactive / login node |
+| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM (Aspera → aria2c → parallel curl → wget) → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
 | **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) and HQ statistics (non-excluded bins) from mosdepth output | Parallelized (all cores) |
 | **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
@@ -28,7 +29,7 @@ All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:lates
 - **mosdepth** v0.3.9 — fast BAM/CRAM depth calculation
 - Pre-built **exclusion BED files** for GRCh38
 
-No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads — the pipeline automatically falls back to `wget` if `ascp` is not available.
+No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads; if it is missing, too old, or disabled via `USE_ASPERA=0`, the pipeline falls back to parallel HTTPS downloads (`aria2c`, else `curl` byte ranges) and finally to single-stream `wget`. See [step 1](#step-1-download--mosdepth-array-job) for the Aspera client version requirement.
 
 ---
 
@@ -162,7 +163,14 @@ bash 01_download_and_mosdepth.sh
 
 Each sample in the task is still processed sequentially as:
 
-1. **Download** the CRAM and CRAI from the ENA using **Aspera** (`ascp`) for high-speed transfer, falling back to `wget` if Aspera fails. Aspera typically achieves 10–100× faster transfers than FTP.
+1. **Download** the CRAM and CRAI from the ENA, trying each transport in descending order of speed and stopping at the first that succeeds:
+
+   | Order | Method | Notes |
+   |---|---|---|
+   | 1 | **Aspera** (`ascp`) | FASP; fastest when the client is new enough (see below). Skip with `USE_ASPERA=0`. |
+   | 2 | **aria2c** | `DOWNLOAD_CONNECTIONS` (default 16) parallel HTTPS streams, resumable. |
+   | 3 | **parallel `curl`** | Same idea using only `curl` byte-range requests, assembled and size-checked. |
+   | 4 | **`wget`** | Single-stream last resort. |
 
    ```
    ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
@@ -172,6 +180,29 @@ Each sample in the task is still processed sequentially as:
    ```
 
    > **Network requirements for Aspera:** TCP port 33001 (outgoing) and UDP port 33001 (both directions) must be open. See [IGSR download FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/) for details.
+
+   > **Aspera client version:** `fasp.sra.ebi.ac.uk` now runs OpenSSH 8.7 and offers only modern SSH transport algorithms — `curve25519-sha256`, `ecdh-sha2-nistp*` and `diffie-hellman-group-exchange-sha256` for key exchange, and *encrypt-then-MAC* MACs only (`umac-128-etm@`, `hmac-sha2-{256,512}-etm@`). The libssh2 bundled with **ascp 3.9.x supports none of these**, so its handshake dies during algorithm negotiation:
+   >
+   > ```
+   > [libssh2] Failure Event: -5 - Unable to exchange encryption keys
+   > ERR [asssh] SSH connection startup failed, err = -5
+   > ascp: failed to authenticate, exiting.
+   > ```
+   >
+   > The final line is misleading: the session never reaches authentication, so **changing the `-i` key file does not help**. Note this is a *server-side* change — a client that worked for years breaks without being touched.
+   >
+   > Fix it with the provisioning script, which needs no root and is idempotent:
+   >
+   > ```bash
+   > module load aspera        # optional, but helps the script find the key
+   > bash install_aspera.sh
+   > ```
+   >
+   > It installs [Aspera Connect 4.2.x](https://www.ibm.com/products/aspera/downloads) into `$WORK_DIR/aspera` (checksum-pinned), locates `asperaweb_id_dsa.openssh`, caches it alongside, and verifies with a real ENA transfer. `config.sh` then picks up `ASPERA_BIN` and `ASPERA_SSH_KEY` automatically.
+   >
+   > **On the key:** Connect releases after 4.1 no longer ship `asperaweb_id_dsa.openssh`, and it is not hosted standalone anywhere authoritative — it exists only inside older installs. ENA does still accept `ssh-dss` for user authentication, so the old key remains valid and merely has to be found. The script searches `$ASPERA_SSH_KEY`, `~/.aspera`, `$CONDA_PREFIX/etc`, any `ascp` on `PATH` (which catches a pre-4.2 site module), and common module roots. If none match it prints how to get one — typically an existing cluster module, or `conda create -n asperakey -c hcc aspera-cli`. Nothing sensitive is committed to this repository.
+   >
+   > Until the client is provisioned, set `USE_ASPERA=0` to skip the doomed handshakes and the FASP log noise — the parallel HTTPS paths are used instead.
 
 2. **Verify** the downloaded CRAM's MD5 checksum against the value in the NYGC sequence index.
 

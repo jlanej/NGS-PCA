@@ -174,7 +174,11 @@ download_aspera() {
   local dest="$2"
   local aspera_path aspera_user
 
-  command -v ascp &>/dev/null || return 1
+  [[ "${USE_ASPERA}" == "1" ]] || return 1
+  # ASPERA_BIN is resolved in config.sh: work-dir install if install_aspera.sh
+  # has been run, else whatever ascp is on PATH.
+  command -v "${ASPERA_BIN}" &>/dev/null || return 1
+  [[ -s "${ASPERA_SSH_KEY}" ]] || return 1
 
   if [[ "${ftp_url}" == *"ftp.sra.ebi.ac.uk"* ]]; then
     aspera_path="${ftp_url//ftp:\/\/ftp.sra.ebi.ac.uk\//}"
@@ -189,7 +193,7 @@ download_aspera() {
   local remote_basename
   remote_basename="$(basename "${aspera_path}")"
   local downloaded="${CRAM_DIR}/${remote_basename}"
-  if ! ascp -i "${ASPERA_SSH_KEY}" \
+  if ! "${ASPERA_BIN}" -i "${ASPERA_SSH_KEY}" \
     -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
     "${aspera_user}:${aspera_path}" \
     "${CRAM_DIR}/"; then
@@ -203,13 +207,142 @@ download_aspera() {
   fi
 }
 
-download_wget() {
+# Rewrite an ENA ftp:// manifest URL to its HTTPS equivalent. ENA serves the
+# same tree over HTTPS with range support, which is what makes the parallel
+# download paths below possible.
+https_url_for() {
   local ftp_url="$1"
+  echo "${ftp_url/ftp:\/\/ftp.sra.ebi.ac.uk/${ENA_HTTPS_BASE}}"
+}
+
+# Content-Length of a remote file, or empty if it cannot be determined.
+# Uses tolower() rather than gawk's IGNORECASE so this also works under the
+# BSD awk and mawk found on some systems.
+remote_size() {
+  curl -sS -I -L --max-time 60 "$1" 2>/dev/null \
+    | awk '{ if (tolower($0) ~ /^content-length:/) v = $2 }
+           END { gsub(/\r/, "", v); print v }'
+}
+
+local_size() {
+  stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null
+}
+
+download_aria2() {
   local dest="$2"
-  if ! wget -q -O "${dest}" "${ftp_url}"; then
+  local url
+  url="$(https_url_for "$1")"
+
+  command -v aria2c &>/dev/null || return 1
+
+  if ! aria2c \
+    --quiet=true \
+    --continue=true \
+    --max-connection-per-server="${DOWNLOAD_CONNECTIONS}" \
+    --split="${DOWNLOAD_CONNECTIONS}" \
+    --min-split-size=1M \
+    --max-tries=5 \
+    --retry-wait=10 \
+    --auto-file-renaming=false \
+    --allow-overwrite=true \
+    --dir "$(dirname "${dest}")" \
+    --out "$(basename "${dest}")" \
+    "${url}"; then
+    rm -f "${dest}" "${dest}.aria2"
+    return 1
+  fi
+  rm -f "${dest}.aria2"
+}
+
+# Parallel byte-range download using only curl, for hosts without aria2c.
+download_curl_parallel() {
+  local dest="$2"
+  local url total chunk parts_dir rc=0 i pid
+  url="$(https_url_for "$1")"
+
+  command -v curl &>/dev/null || return 1
+
+  total="$(remote_size "${url}")"
+  [[ "${total}" =~ ^[0-9]+$ ]] || return 1
+  (( total > 0 )) || return 1
+
+  local n="${DOWNLOAD_CONNECTIONS}"
+  (( n < 1 )) && n=1
+  chunk=$(( (total + n - 1) / n ))
+  parts_dir="${dest}.parts.$$"
+  rm -rf "${parts_dir}"
+  mkdir -p "${parts_dir}" || return 1
+
+  local pids=()
+  for (( i = 0; i < n; i++ )); do
+    local start=$(( i * chunk ))
+    local end=$(( start + chunk - 1 ))
+    (( start >= total )) && break
+    (( end >= total )) && end=$(( total - 1 ))
+    # Zero-padded part names so the assembly glob sorts numerically.
+    curl -sS -L --fail --retry 5 --retry-delay 10 \
+      -r "${start}-${end}" \
+      -o "${parts_dir}/part.$(printf '%04d' "${i}")" \
+      "${url}" &
+    pids+=("$!")
+  done
+
+  for pid in "${pids[@]}"; do
+    wait "${pid}" || rc=1
+  done
+  if (( rc != 0 )); then
+    rm -rf "${parts_dir}"
+    return 1
+  fi
+
+  if ! cat "${parts_dir}"/part.* > "${dest}"; then
+    rm -rf "${parts_dir}" ; rm -f "${dest}"
+    return 1
+  fi
+  rm -rf "${parts_dir}"
+
+  # Guard against a short/torn assembly before mosdepth ever sees the file.
+  local got
+  got="$(local_size "${dest}")"
+  if [[ "${got}" != "${total}" ]]; then
+    echo "  ERROR: size mismatch after parallel download (expected ${total}, got ${got:-0})"
     rm -f "${dest}"
     return 1
   fi
+}
+
+download_wget() {
+  local ftp_url="$1"
+  local dest="$2"
+  if ! wget -q -c -O "${dest}" "${ftp_url}"; then
+    rm -f "${dest}"
+    return 1
+  fi
+}
+
+# Try each transport in descending order of speed. Returns non-zero only when
+# every available method failed.
+download_file() {
+  local url="$1" dest="$2" label="$3"
+
+  if download_aspera "${url}" "${dest}"; then
+    echo "  ${label}: Aspera download complete."
+    return 0
+  fi
+  if download_aria2 "${url}" "${dest}"; then
+    echo "  ${label}: aria2c download complete (${DOWNLOAD_CONNECTIONS} streams)."
+    return 0
+  fi
+  if download_curl_parallel "${url}" "${dest}"; then
+    echo "  ${label}: parallel curl download complete (${DOWNLOAD_CONNECTIONS} ranges)."
+    return 0
+  fi
+  if download_wget "${url}" "${dest}"; then
+    echo "  ${label}: wget download complete (single stream)."
+    return 0
+  fi
+  echo "  ERROR: all download methods failed for ${url}"
+  return 1
 }
 
 process_manifest_line() {
@@ -253,12 +386,8 @@ process_manifest_line() {
 
   if [[ ! -f "${LOCAL_CRAM}" ]]; then
     echo "[1/3] Downloading CRAM..."
-    if download_aspera "${CRAM_FTP_URL}" "${LOCAL_CRAM}"; then
-      echo "  Aspera download complete."
-    else
-      echo "  Aspera failed; falling back to wget..."
-      download_wget "${CRAM_FTP_URL}" "${LOCAL_CRAM}"
-      echo "  wget download complete."
+    if ! download_file "${CRAM_FTP_URL}" "${LOCAL_CRAM}" "CRAM"; then
+      return 1
     fi
   else
     echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
@@ -266,12 +395,9 @@ process_manifest_line() {
 
   if [[ ! -f "${LOCAL_CRAI}" ]]; then
     echo "  Downloading CRAI..."
-    if download_aspera "${CRAI_FTP_URL}" "${LOCAL_CRAI}"; then
-      echo "  Aspera download complete."
-    else
-      echo "  Aspera failed; falling back to wget..."
-      download_wget "${CRAI_FTP_URL}" "${LOCAL_CRAI}"
-      echo "  wget download complete."
+    if ! download_file "${CRAI_FTP_URL}" "${LOCAL_CRAI}" "CRAI"; then
+      rm -f "${LOCAL_CRAM}"
+      return 1
     fi
   else
     echo "  CRAI already present: ${LOCAL_CRAI}"
