@@ -81,29 +81,25 @@ PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 # That message is misleading — the transfer never reaches authentication, so
 # swapping the -i key file does NOT help. Upgrade to Aspera Connect 4.2.x.
 #
-# Run 'bash install_aspera.sh' to provision a current client plus the key into
-# WORK_DIR; the two blocks below then pick it up automatically.
+# A SECOND change landed alongside that hardening: the anonymous key
+# 'asperaweb_id_dsa.openssh' is NO LONGER ACCEPTED by ENA. Verified directly —
+# same client and server, old key rejected, new key accepted. EBI replaced it
+# with an RSA key for the public accounts, published in KB0011565. So a working
+# setup needs BOTH a >=4.x client and the new key; neither alone is enough.
+#
+# 'bash install_aspera.sh' builds an image providing both (see aspera.def) and
+# writes the 'ascp' wrapper picked up below.
 ASPERA_HOME="${ASPERA_HOME:-${WORK_DIR}/aspera}"
-
-# ascp binary: explicit override > work-dir install > whatever is on PATH.
+ASPERA_SIF="${ASPERA_SIF:-${ASPERA_HOME}/aspera.sif}"
+# Falls back to any ascp on PATH, so a working site install is still used.
 if [[ -z "${ASPERA_BIN:-}" ]]; then
-  if [[ -x "${ASPERA_HOME}/.aspera/connect/bin/ascp" ]]; then
-    ASPERA_BIN="${ASPERA_HOME}/.aspera/connect/bin/ascp"
+  if [[ -x "${ASPERA_HOME}/bin/ascp" ]]; then
+    ASPERA_BIN="${ASPERA_HOME}/bin/ascp"
   else
     ASPERA_BIN="ascp"
   fi
 fi
-
-# Anonymous ENA key: explicit override > work-dir cache > a personal Connect
-# install. Connect releases after 4.1 no longer ship this file, so on a fresh
-# machine it is install_aspera.sh that puts it in the work-dir location.
-if [[ -z "${ASPERA_SSH_KEY:-}" ]]; then
-  if [[ -s "${ASPERA_HOME}/etc/asperaweb_id_dsa.openssh" ]]; then
-    ASPERA_SSH_KEY="${ASPERA_HOME}/etc/asperaweb_id_dsa.openssh"
-  else
-    ASPERA_SSH_KEY="${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh"
-  fi
-fi
+ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${ASPERA_HOME}/etc/ebi_public.key}"
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
 # Set USE_ASPERA=0 to skip ascp entirely (avoids ~2 doomed handshakes and a
