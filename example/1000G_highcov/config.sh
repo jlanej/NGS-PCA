@@ -131,6 +131,7 @@ MOSDEPTH_THREADS="${MOSDEPTH_THREADS:-2}"
 COMPARE_FAST_MODE="${COMPARE_FAST_MODE:-0}"
 MOSDEPTH_FAST_DIR="${MOSDEPTH_FAST_DIR:-${WORK_DIR}/mosdepth_output_fast}"
 NGSPCA_FAST_OUTPUT="${NGSPCA_FAST_OUTPUT:-${WORK_DIR}/ngspca_output_fast}"
+QC_FAST_OUTPUT="${QC_FAST_OUTPUT:-${WORK_DIR}/qc_output_fast}"
 MOSDEPTH_TIMING_DIR="${MOSDEPTH_TIMING_DIR:-${QC_OUTPUT}/mosdepth_timing}"
 
 # ── NGS-PCA parameters ──────────────────────────────────────────────────────
