@@ -264,6 +264,45 @@ Once all mosdepth results are available, this single job computes ~200 PCs using
 | Walltime | 6–12 hours |
 | Disk (output) | ~500 MB |
 
+### Optional: mosdepth fast-mode comparison
+
+mosdepth's `--fast-mode` skips CIGAR-aware depth and mate-overlap correction, and its README
+recommends it for most use cases. Whether it changes the PCs is an empirical question this
+pipeline can answer about itself: both effects are largely per-sample multiplicative shifts,
+which the log₂ fold change against each sample's own median absorbs, so near-perfect PC
+correlation is the expectation — and if it holds, fast mode is a free speedup on the most
+expensive stage.
+
+```bash
+# 1. Rerun step 1 with the comparison on: each task runs mosdepth twice per
+#    sample (standard -> mosdepth_output/, fast -> mosdepth_output_fast/),
+#    recording each run's wall time. Downloads are shared and untimed; the two
+#    runs alternate order so cache warming cancels out in aggregate.
+export COMPARE_FAST_MODE=1
+bash 01_download_and_mosdepth.sh
+
+# 2. NGS-PCA on each tree — same parameters, seed, and exclusion bed
+sbatch 02_run_ngspca.sh
+MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" \
+NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_fast" sbatch 02_run_ngspca.sh
+
+# 3. Correlations, runtime boxplots, and a written summary
+#    (host python3; the figure needs matplotlib, the tables do not)
+bash 04_fast_mode_eval.sh
+```
+
+The evaluation lands in `$QC_OUTPUT/fast_mode_eval/`: per-PC Pearson r with singular-value
+ratios (`pc_correlation.tsv`), wall-time statistics and per-sample paired speedups
+(`timing_summary.tsv`), a six-panel figure (`fast_mode_summary.png`), and
+`fast_mode_report.md` with the headline numbers, including an order check that would expose
+cache-warming bias. Correlations are evaluated as |r|, since a singular vector's sign is
+arbitrary.
+
+Enabling the comparison reprocesses any sample missing either tree, so every timed pair comes
+from one node and one download; a cohort already processed without it will re-download. Timing
+rows record the mosdepth version — keep one version per comparison (the image pins one, see the
+Dockerfile).
+
 ### Output files
 
 All output is written to `$WORK_DIR/ngspca_output/`:

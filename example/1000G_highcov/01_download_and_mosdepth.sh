@@ -53,6 +53,24 @@ mosdepth_output_path() {
   echo "${MOSDEPTH_DIR}/${1}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
 }
 
+# Fast-mode twin of the above. Same file name, so NGS-PCA derives identical
+# sample identifiers from either tree and the two PC tables join by sample.
+mosdepth_fast_output_path() {
+  echo "${MOSDEPTH_FAST_DIR}/${1}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
+}
+
+# Whether a sample still needs this script to run. With the fast-mode
+# comparison on, a sample missing either output is redone in full so that
+# every timed pair comes from one node and one downloaded CRAM.
+needs_processing() {
+  local sample="$1"
+  if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
+    [[ ! -s "$(mosdepth_output_path "${sample}")" || ! -s "$(mosdepth_fast_output_path "${sample}")" ]]
+  else
+    [[ ! -s "$(mosdepth_output_path "${sample}")" ]]
+  fi
+}
+
 if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   # ── Pre-submission mode ────────────────────────────────────────────────────
   # When run directly (not as a SLURM array task), scan the manifest to find
@@ -69,8 +87,7 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   SAMPLE_IDX=0
   while IFS=$'\t' read -r SAMPLE_ID _; do
     SAMPLE_IDX=$(( SAMPLE_IDX + 1 ))
-    MOSDEPTH_OUTPUT="$(mosdepth_output_path "${SAMPLE_ID}")"
-    if [[ ! -s "${MOSDEPTH_OUTPUT}" ]]; then
+    if needs_processing "${SAMPLE_ID}"; then
       TASK_ID=$(( (SAMPLE_IDX - 1) / SAMPLES_PER_TASK + 1 ))
       if [[ "${TASK_ID}" != "${PREV_TASK_ID}" ]]; then
         NEEDED_TASKS+=("${TASK_ID}")
@@ -173,6 +190,13 @@ TASK_START=$(( (SLURM_ARRAY_TASK_ID - 1) * SAMPLES_PER_TASK + 1 ))
 TASK_END=$(( TASK_START + SAMPLES_PER_TASK - 1 ))
 if (( TASK_END > TOTAL_SAMPLES )); then
   TASK_END=${TOTAL_SAMPLES}
+fi
+
+if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
+  mkdir -p "${MOSDEPTH_FAST_DIR}" "${MOSDEPTH_TIMING_DIR}"
+  # recorded in every timing row, so the eval can say what was measured
+  MOSDEPTH_VERSION_STR="$(apptainer exec "${SIF_IMAGE}" mosdepth --version 2>/dev/null | head -1 | awk '{print $NF}')"
+  MOSDEPTH_VERSION_STR="${MOSDEPTH_VERSION_STR:-unknown}"
 fi
 
 # ── Stage 1: Download CRAM + CRAI ───────────────────────────────────────────
@@ -356,6 +380,46 @@ download_file() {
   return 1
 }
 
+# ── Stage 2 helpers: mosdepth invocation, plain and timed ───────────────────
+
+# run_mosdepth <sample> <output_dir> [extra mosdepth flags...]
+run_mosdepth() {
+  local sample="$1" out_dir="$2"
+  shift 2
+  apptainer exec \
+    --bind "${CRAM_DIR}":/crams \
+    --bind "${out_dir}":/mosdepth \
+    --bind "${REF_DIR}":/ref \
+    "${SIF_IMAGE}" \
+    mosdepth \
+      -n \
+      -t "${MOSDEPTH_THREADS}" \
+      --by "${MOSDEPTH_BIN_SIZE}" \
+      --fasta "/ref/$(basename "${REF_FASTA}")" \
+      "$@" \
+      "/mosdepth/${sample}.by${MOSDEPTH_BIN_SIZE}" \
+      "/crams/${sample}.cram"
+}
+
+# timed_mosdepth <sample> <mode> <first_mode> <output_dir> [extra flags...]
+# Wall-clock seconds of the run, written as one headerless row per sample and
+# mode so concurrent array tasks never share a file. Columns:
+#   sample  mode  first_mode  wall_s  mosdepth_version  threads  bin_size  host  epoch
+timed_mosdepth() {
+  local sample="$1" mode="$2" first_mode="$3" out_dir="$4"
+  shift 4
+  local t0 t1
+  t0=$(date +%s)
+  run_mosdepth "${sample}" "${out_dir}" "$@"
+  t1=$(date +%s)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${sample}" "${mode}" "${first_mode}" "$(( t1 - t0 ))" \
+    "${MOSDEPTH_VERSION_STR}" "${MOSDEPTH_THREADS}" "${MOSDEPTH_BIN_SIZE}" \
+    "$(hostname)" "${t0}" \
+    > "${MOSDEPTH_TIMING_DIR}/${sample}.${mode}.tsv"
+  echo "  ${mode}: $(( t1 - t0 )) s"
+}
+
 process_manifest_line() {
   local line_num="$1"
   local line
@@ -385,11 +449,12 @@ process_manifest_line() {
   echo " Started: $(date)"
   echo "============================================================"
 
-  # ── Skip if mosdepth output already exists and is non-empty ──────────────────
+  # ── Skip if the needed mosdepth output already exists and is non-empty ──────
   MOSDEPTH_OUTPUT="$(mosdepth_output_path "${SAMPLE_ID}")"
+  MOSDEPTH_FAST_OUTPUT="$(mosdepth_fast_output_path "${SAMPLE_ID}")"
   LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
   LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
-  if [[ -s "${MOSDEPTH_OUTPUT}" ]]; then
+  if ! needs_processing "${SAMPLE_ID}"; then
     echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
     rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
     return 0
@@ -428,27 +493,39 @@ process_manifest_line() {
   fi
 
   # ── Stage 2: Run mosdepth ─────────────────────────────────────────────────
-  echo "[2/3] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
+  if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
+    # Both runs use the CRAM this task just downloaded, so download time is in
+    # neither measurement. The order alternates by manifest line: whichever
+    # mode runs second reads a warmer page cache, and alternating cancels that
+    # in aggregate. first_mode is recorded so the eval can check it did.
+    local first_mode=normal
+    (( line_num % 2 == 0 )) && first_mode=fast
+    echo "[2/3] Running mosdepth twice for the fast-mode comparison (${first_mode} first; bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
+    if [[ "${first_mode}" == "normal" ]]; then
+      timed_mosdepth "${SAMPLE_ID}" normal "${first_mode}" "${MOSDEPTH_DIR}"
+      timed_mosdepth "${SAMPLE_ID}" fast "${first_mode}" "${MOSDEPTH_FAST_DIR}" --fast-mode
+    else
+      timed_mosdepth "${SAMPLE_ID}" fast "${first_mode}" "${MOSDEPTH_FAST_DIR}" --fast-mode
+      timed_mosdepth "${SAMPLE_ID}" normal "${first_mode}" "${MOSDEPTH_DIR}"
+    fi
+    if [[ ! -f "${MOSDEPTH_OUTPUT}" || ! -f "${MOSDEPTH_FAST_OUTPUT}" ]]; then
+      echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT} and/or ${MOSDEPTH_FAST_OUTPUT}"
+      return 1
+    fi
+    echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
+    echo "  mosdepth complete: ${MOSDEPTH_FAST_OUTPUT}"
+  else
+    echo "[2/3] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
 
-  apptainer exec \
-    --bind "${CRAM_DIR}":/crams \
-    --bind "${MOSDEPTH_DIR}":/mosdepth \
-    --bind "${REF_DIR}":/ref \
-    "${SIF_IMAGE}" \
-    mosdepth \
-      -n \
-      -t "${MOSDEPTH_THREADS}" \
-      --by "${MOSDEPTH_BIN_SIZE}" \
-      --fasta "/ref/$(basename "${REF_FASTA}")" \
-      "/mosdepth/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}" \
-      "/crams/${SAMPLE_ID}.cram"
+    run_mosdepth "${SAMPLE_ID}" "${MOSDEPTH_DIR}"
 
-  # Verify output was created
-  if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
-    echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT}"
-    return 1
+    # Verify output was created
+    if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
+      echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT}"
+      return 1
+    fi
+    echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
   fi
-  echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
 
   # ── Stage 3: Clean up CRAM/CRAI ───────────────────────────────────────────
   echo "[3/3] Cleaning up downloaded CRAM/CRAI..."
