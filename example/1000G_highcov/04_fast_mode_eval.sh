@@ -32,5 +32,7 @@ exec python3 "${SCRIPT_DIR}/04_fast_mode_eval.py" \
   --normal "${NGSPCA_OUTPUT}" \
   --fast "${NGSPCA_FAST_OUTPUT}" \
   --timing "${MOSDEPTH_TIMING_DIR}" \
+  --qc-normal "${QC_OUTPUT}/sample_qc.tsv" \
+  --qc-fast "${QC_FAST_OUTPUT}/sample_qc.tsv" \
   --out "${QC_OUTPUT}/fast_mode_eval" \
   "$@"

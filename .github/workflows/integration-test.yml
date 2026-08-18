@@ -879,6 +879,18 @@ jobs:
               for mode, wall in (("normal", 600 + i), ("fast", 300 + i // 2)):
                   with open(f"{S}/timing/{s}.{mode}.tsv", "w") as out:
                       out.write(f"{s}\t{mode}\t{first}\t{wall}\t0.3.14\t2\t1000\thost1\t1700000000\n")
+          # QC tables: MTDNA_CN uniformly 5% higher in fast (r stays 1, shift
+          # +5.00%), one INFERRED_SEX flipped, POPULATION text must be skipped
+          for dirname, mt_scale, hq_scale in (("qc_normal", 1.0, 1.0), ("qc_fast", 1.05, 1.02)):
+              os.makedirs(f"{S}/{dirname}", exist_ok=True)
+              with open(f"{S}/{dirname}/sample_qc.tsv", "w") as out:
+                  out.write("SAMPLE_ID\tMEAN_AUTOSOMAL_COV\tHQ_MEDIAN_COV\tINFERRED_SEX\tMTDNA_CN\tPOPULATION\n")
+                  for i, s in enumerate(samples):
+                      sex = "M" if i % 2 == 0 else "F"
+                      if dirname == "qc_fast" and i == 7:
+                          sex = "M"
+                      out.write(f"{s}\t{30 + 0.1 * i}\t{(29 + 0.1 * i) * hq_scale}\t{sex}\t"
+                                f"{(3 + 0.05 * i) * mt_scale}\tGBR\n")
           print("fixture written to", S)
           EOF
 
@@ -888,7 +900,8 @@ jobs:
           set -euo pipefail
           F="${RUNNER_TEMP}/fastmode_fixture"
           python3 04_fast_mode_eval.py --normal "$F/normal" --fast "$F/fast" \
-            --timing "$F/timing" --out "$F/out" --pcs 6
+            --timing "$F/timing" --out "$F/out" --pcs 6 \
+            --qc-normal "$F/qc_normal/sample_qc.tsv" --qc-fast "$F/qc_fast/sample_qc.tsv"
 
           check() { # label actual expected
             if [ "$2" != "$3" ]; then
@@ -908,6 +921,17 @@ jobs:
           check "median speedup" "$(awk -F'\t' '$1=="paired_speedup" {print $3}' "$F/out/timing_summary.tsv")" "2.00"
           grep -q "Median per-sample speedup" "$F/out/fast_mode_report.md" \
             || { echo "::error::report is missing the speedup headline"; exit 1; }
+
+          QC="$F/out/qc_concordance.tsv"
+          check "MTDNA_CN r"        "$(awk -F'\t' '$1=="MTDNA_CN" {print $3}' "$QC")" "1.000000"
+          check "MTDNA_CN shift"    "$(awk -F'\t' '$1=="MTDNA_CN" {print $4}' "$QC")" "5.00"
+          check "HQ_MEDIAN_COV shift" "$(awk -F'\t' '$1=="HQ_MEDIAN_COV" {print $4}' "$QC")" "2.00"
+          check "MEAN_AUTOSOMAL_COV shift" "$(awk -F'\t' '$1=="MEAN_AUTOSOMAL_COV" {print $4}' "$QC")" "0.00"
+          grep -q "POPULATION" "$QC" \
+            && { echo "::error::a text column reached the numeric concordance table"; exit 1; }
+          grep -q "INFERRED_SEX agreement: 39/40" "$F/out/fast_mode_report.md" \
+            || { echo "::error::report is missing the sex-agreement count"; exit 1; }
+          echo "PASS: QC concordance - MTDNA_CN shift detected, text columns skipped, sex flip counted"
           [ ! -f "$F/out/fast_mode_summary.png" ] \
             || { echo "::error::a figure appeared without matplotlib"; exit 1; }
           echo "PASS: tables and report written, figure correctly skipped"
@@ -926,7 +950,10 @@ jobs:
           pip install --quiet matplotlib
           F="${RUNNER_TEMP}/fastmode_fixture"
           python3 04_fast_mode_eval.py --normal "$F/normal" --fast "$F/fast" \
-            --timing "$F/timing" --out "$F/out_plot" --pcs 6
-          [ -s "$F/out_plot/fast_mode_summary.png" ] \
-            || { echo "::error::figure was not written with matplotlib installed"; exit 1; }
-          echo "PASS: fast_mode_summary.png written"
+            --timing "$F/timing" --out "$F/out_plot" --pcs 6 \
+            --qc-normal "$F/qc_normal/sample_qc.tsv" --qc-fast "$F/qc_fast/sample_qc.tsv"
+          for figure in fast_mode_summary.png fast_mode_qc.png; do
+            [ -s "$F/out_plot/$figure" ] \
+              || { echo "::error::$figure was not written with matplotlib installed"; exit 1; }
+          done
+          echo "PASS: fast_mode_summary.png and fast_mode_qc.png written"

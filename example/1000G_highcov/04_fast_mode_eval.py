@@ -8,13 +8,18 @@ mosdepth --fast-mode - and the paired mosdepth wall times recorded by
   pc_correlation.tsv    per-PC Pearson r between the runs, and the ratio of
                         singular values
   timing_summary.tsv    per-mode wall-time statistics and paired speedups
+  qc_concordance.tsv    per-column agreement of the two sample_qc.tsv tables,
+                        when both were produced (see the README) - this is
+                        where MTDNA_CN and the coverage ratios are compared
   fast_mode_report.md   the headline numbers and their caveats
   fast_mode_summary.png correlations, scatters, runtime boxplot, speedup
                         histogram (only when matplotlib is available)
+  fast_mode_qc.png      QC column agreement and the MTDNA_CN scatter (only
+                        with matplotlib and both QC tables)
 
 The sign of a singular vector is arbitrary, so correlations are reported as
 computed and evaluated as |r|. Needs only the standard library; matplotlib is
-optional and its absence skips the figure, not the evaluation.
+optional and its absence skips the figures, not the evaluation.
 """
 
 import argparse
@@ -101,11 +106,58 @@ def same_file_content(a, b):
         return False
 
 
+def read_qc(path):
+    """sample_qc.tsv -> (column names after SAMPLE_ID, {sample: {column: text}})"""
+    with open(path) as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        rows = {}
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            rows[fields[0]] = dict(zip(header[1:], fields[1:]))
+    return header[1:], rows
+
+
+def qc_concordance(normal_qc, fast_qc):
+    """Per-column agreement between the two QC tables.
+
+    Numeric columns get Pearson r and the median signed relative difference
+    (fast minus normal, as a percent of normal) - correlation alone would
+    miss a uniform bias, which is exactly what skipping mate-overlap
+    correction produces. Non-numeric columns are skipped, except INFERRED_SEX,
+    which is reported as an agreement count.
+    """
+    normal_columns, normal_rows = normal_qc
+    fast_columns, fast_rows = fast_qc
+    shared = [s for s in normal_rows if s in fast_rows]
+    numeric, sex = [], None
+    for column in [c for c in normal_columns if c in set(fast_columns)]:
+        pairs = []
+        for sample in shared:
+            try:
+                pairs.append((float(normal_rows[sample][column]),
+                              float(fast_rows[sample][column])))
+            except (KeyError, ValueError):
+                pass
+        if len(pairs) >= 3 and len(pairs) >= 0.9 * len(shared):
+            xs = [p[0] for p in pairs]
+            ys = [p[1] for p in pairs]
+            rel = [100.0 * (y - x) / abs(x) for x, y in pairs if x != 0]
+            numeric.append({"column": column, "n": len(pairs), "r": pearson(xs, ys),
+                            "median_rel_diff_pct": statistics.median(rel) if rel else float("nan")})
+        elif column == "INFERRED_SEX":
+            agree = sum(1 for s in shared
+                        if normal_rows[s].get(column) == fast_rows[s].get(column))
+            sex = (agree, len(shared))
+    return len(shared), numeric, sex
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--normal", required=True, help="NGS-PCA output dir from standard mosdepth")
     parser.add_argument("--fast", required=True, help="NGS-PCA output dir from mosdepth --fast-mode")
     parser.add_argument("--timing", default=None, help="directory of per-sample timing rows")
+    parser.add_argument("--qc-normal", default=None, help="sample_qc.tsv from the standard tree")
+    parser.add_argument("--qc-fast", default=None, help="sample_qc.tsv from the fast tree")
     parser.add_argument("--out", required=True, help="directory to write the evaluation into")
     parser.add_argument("--pcs", type=int, default=20, help="leading PCs to evaluate (default 20)")
     args = parser.parse_args()
@@ -172,6 +224,22 @@ def main():
     for t in paired.values():
         by_order[t["normal"]["first_mode"]].append(t["normal"]["wall_s"] / t["fast"]["wall_s"])
 
+    # ── QC concordance ────────────────────────────────────────────────────────
+    qc_shared, qc_numeric, qc_sex = 0, [], None
+    qc_note = None
+    if args.qc_normal and args.qc_fast:
+        if os.path.isfile(args.qc_normal) and os.path.isfile(args.qc_fast):
+            qc_shared, qc_numeric, qc_sex = qc_concordance(read_qc(args.qc_normal),
+                                                           read_qc(args.qc_fast))
+            with open(os.path.join(args.out, "qc_concordance.tsv"), "w") as out:
+                out.write("column\tn\tpearson_r\tmedian_rel_diff_pct\n")
+                for row in qc_numeric:
+                    out.write(f"{row['column']}\t{row['n']}\t{row['r']:.6f}\t"
+                              f"{row['median_rel_diff_pct']:.2f}\n")
+        else:
+            qc_note = ("QC tables not found - run 03a and 03 for both trees (see the README) to "
+                       "compare depth-derived phenotypes such as MTDNA_CN")
+
     normal_stats, fast_stats, speedup_stats = summarise(normal_walls), summarise(fast_walls), summarise(speedups)
     with open(os.path.join(args.out, "timing_summary.tsv"), "w") as out:
         out.write("metric\tn\tmedian\tmean\tsd\tmin\tmax\n")
@@ -203,6 +271,24 @@ def main():
                          f"warming, not fast mode, is being measured.")
     else:
         lines.append("- No paired timing rows found; runtime comparison skipped.")
+    if qc_numeric:
+        lines.append("")
+        lines.append(f"## QC concordance ({qc_shared} shared samples)")
+        lines.append("")
+        mtdna = next((row for row in qc_numeric if row["column"] == "MTDNA_CN"), None)
+        if mtdna:
+            lines.append(f"- MTDNA_CN: r = **{mtdna['r']:.6f}**, median relative difference "
+                         f"fast vs normal = **{mtdna['median_rel_diff_pct']:+.2f}%**. A nonzero "
+                         f"shift here is expected in kind if not in size: skipping mate-overlap "
+                         f"correction inflates chrM and the nuclear genome by different amounts "
+                         f"when their insert sizes differ. Correlation, not the shift, decides "
+                         f"whether fast-mode MTDNA_CN ranks samples the same way.")
+        if qc_sex:
+            lines.append(f"- INFERRED_SEX agreement: {qc_sex[0]}/{qc_sex[1]}")
+        lines.append(f"- Every numeric column is in qc_concordance.tsv ({len(qc_numeric)} compared).")
+    elif qc_note:
+        lines.append("")
+        lines.append(f"- {qc_note}.")
     lines.append("")
     lines.append("Fast mode skips CIGAR-aware depth and mate-overlap correction. Both act mostly "
                  "as per-sample multiplicative shifts, which the log2 fold change against each "
@@ -275,8 +361,53 @@ def main():
         fig.savefig(os.path.join(args.out, "fast_mode_summary.png"), dpi=150)
         print(f"wrote {os.path.join(args.out, 'fast_mode_summary.png')}")
 
+    if plt is not None and qc_numeric:
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), constrained_layout=True)
+        names = [row["column"] for row in qc_numeric]
+
+        axes[0].bar(range(len(qc_numeric)), [abs(row["r"]) for row in qc_numeric], color="#33689E")
+        axes[0].set_xticks(range(len(qc_numeric)))
+        axes[0].set_xticklabels(names, rotation=60, ha="right", fontsize=7)
+        axes[0].set_ylabel("|Pearson r|")
+        axes[0].set_title("QC column correlation, normal vs fast")
+
+        scatter = next((row for row in qc_numeric if row["column"] == "MTDNA_CN"), qc_numeric[0])
+        normal_columns, normal_rows = read_qc(args.qc_normal)
+        fast_columns, fast_rows = read_qc(args.qc_fast)
+        pairs = []
+        for sample in normal_rows:
+            if sample in fast_rows:
+                try:
+                    pairs.append((float(normal_rows[sample][scatter["column"]]),
+                                  float(fast_rows[sample][scatter["column"]])))
+                except (KeyError, ValueError):
+                    pass
+        xs = [p[0] for p in pairs]
+        ys = [p[1] for p in pairs]
+        axes[1].plot(xs, ys, ".", markersize=4, alpha=0.6, color="#33689E")
+        lo, hi = min(xs + ys), max(xs + ys)
+        axes[1].plot([lo, hi], [lo, hi], color="grey", linewidth=0.8)
+        axes[1].set_xlabel(f"{scatter['column']} normal")
+        axes[1].set_ylabel(f"{scatter['column']} fast")
+        axes[1].set_title(f"{scatter['column']}: r = {scatter['r']:.5f}, "
+                          f"median shift {scatter['median_rel_diff_pct']:+.2f}%")
+
+        axes[2].bar(range(len(qc_numeric)),
+                    [row["median_rel_diff_pct"] for row in qc_numeric], color="#33689E")
+        axes[2].axhline(0.0, color="grey", linewidth=0.8)
+        axes[2].set_xticks(range(len(qc_numeric)))
+        axes[2].set_xticklabels(names, rotation=60, ha="right", fontsize=7)
+        axes[2].set_ylabel("median relative difference (%)")
+        axes[2].set_title("Systematic shift, fast vs normal")
+
+        fig.suptitle("sample_qc.tsv concordance", fontsize=13)
+        fig.savefig(os.path.join(args.out, "fast_mode_qc.png"), dpi=150)
+        print(f"wrote {os.path.join(args.out, 'fast_mode_qc.png')}")
+
     print(f"wrote {os.path.join(args.out, 'pc_correlation.tsv')}")
     print(f"wrote {os.path.join(args.out, 'timing_summary.tsv')}")
+    if qc_numeric:
+        print(f"wrote {os.path.join(args.out, 'qc_concordance.tsv')}")
     print(f"wrote {os.path.join(args.out, 'fast_mode_report.md')}")
     print(f"min |r| over PC1-PC{k}: {min_abs_r:.6f}"
           + (f"; median speedup {speedup_stats['median']:.2f}x" if speedup_stats["n"] else ""))

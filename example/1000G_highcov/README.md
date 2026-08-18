@@ -286,8 +286,16 @@ sbatch 02_run_ngspca.sh
 MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" \
 NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_fast" sbatch 02_run_ngspca.sh
 
-# 3. Correlations, runtime boxplots, and a written summary
-#    (host python3; the figure needs matplotlib, the tables do not)
+# 3. Optional: QC tables for each tree, so depth-derived phenotypes -
+#    MTDNA_CN, coverage ratios, inferred sex - are compared between modes too
+sbatch 03a_mosdepth_coverage_summary.sh && bash 03_collect_qc.sh
+MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" QC_OUTPUT="${WORK_DIR}/qc_output_fast" \
+  sbatch 03a_mosdepth_coverage_summary.sh
+MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" QC_OUTPUT="${WORK_DIR}/qc_output_fast" \
+  bash 03_collect_qc.sh
+
+# 4. Correlations, runtime boxplots, and a written summary
+#    (host python3; the figures need matplotlib, the tables do not)
 bash 04_fast_mode_eval.sh
 ```
 
@@ -296,7 +304,10 @@ ratios (`pc_correlation.tsv`), wall-time statistics and per-sample paired speedu
 (`timing_summary.tsv`), a six-panel figure (`fast_mode_summary.png`), and
 `fast_mode_report.md` with the headline numbers, including an order check that would expose
 cache-warming bias. Correlations are evaluated as |r|, since a singular vector's sign is
-arbitrary.
+arbitrary. When both QC tables exist, the eval also writes `qc_concordance.tsv` and
+`fast_mode_qc.png` — per-column Pearson r plus the median relative difference, so a uniform
+bias (the signature of skipped mate-overlap correction, e.g. in `MTDNA_CN`) is visible even
+where correlation is perfect.
 
 Enabling the comparison reprocesses any sample missing either tree, so every timed pair comes
 from one node and one download; a cohort already processed without it will re-download. Timing
