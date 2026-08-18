@@ -92,6 +92,17 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     exit 0
   fi
 
+  # Provision Aspera here, on the submit host, rather than inside the array
+  # tasks: the build downloads ~68 MB and writes one shared .sif, so hundreds
+  # of concurrent tasks would race on it. Array tasks only consume the result,
+  # and fall back to the parallel-HTTPS paths if it is absent.
+  if [[ "${USE_ASPERA}" == "1" && ! -x "${ASPERA_HOME}/bin/ascp" ]]; then
+    echo "Provisioning Aspera (one-time)..."
+    if ! bash "${SCRIPT_DIR}/install_aspera.sh"; then
+      echo "  Continuing without Aspera; downloads will use parallel HTTPS."
+    fi
+  fi
+
   # Build a compact SLURM array spec (e.g. "1-5,7,9-12") from the needed task IDs.
   ARRAY_SPEC=""
   RANGE_START=""

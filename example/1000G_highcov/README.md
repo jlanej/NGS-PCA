@@ -17,7 +17,7 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | Stage | Script | What it does | SLURM type |
 |-------|--------|-------------|------------|
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
-| **0b** | `install_aspera.sh` | *Optional.* Build `aspera.def` into `$WORK_DIR` — a current `ascp` plus the EMBL-EBI public key — then verify by logging in to ENA | Interactive / login node |
+| — | `install_aspera.sh` | Builds `aspera.def` into `$WORK_DIR` — a current `ascp` plus the EMBL-EBI public key — and verifies by logging in to ENA. **Run automatically by stage 1**; only invoke it directly to re-provision | Interactive / login node |
 | **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM (Aspera → aria2c → parallel curl → wget) → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
 | **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) and HQ statistics (non-excluded bins) from mosdepth output | Parallelized (all cores) |
@@ -193,13 +193,9 @@ Each sample in the task is still processed sequentially as:
    >
    > **Two things changed, and you need both fixes.** Upgrading the client alone is not enough: the anonymous key `asperaweb_id_dsa.openssh` is **no longer accepted by ENA** either. Verified directly — same client and server, old key rejected, new key accepted. EMBL-EBI replaced it with an RSA key for the public accounts (`fasp-public`, `fasp-ml`, `era-fasp`), documented in [KB0011597](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011597) and [KB0011565](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011565).
    >
-   > Provision both with:
+   > **This is handled for you.** Running `bash 01_download_and_mosdepth.sh` provisions Aspera on the submit host before it submits the array, so there is no extra step to remember. It happens there rather than inside the array tasks because the build downloads ~68 MB and writes one shared `.sif` — hundreds of concurrent tasks would race on it.
    >
-   > ```bash
-   > bash install_aspera.sh
-   > ```
-   >
-   > It builds `aspera.def` into `$WORK_DIR/aspera/aspera.sif`, which pairs a checksum-pinned [Aspera Connect 4.2.13](https://www.ibm.com/products/aspera/downloads) with the current EBI key, then verifies with a real `--mode=test-login`. `config.sh` picks up `ASPERA_BIN` and `ASPERA_SSH_KEY` automatically.
+   > Under the hood that runs `install_aspera.sh`, which builds `aspera.def` into `$WORK_DIR/aspera/aspera.sif`, pairing a checksum-pinned [Aspera Connect 4.2.13](https://www.ibm.com/products/aspera/downloads) with the current EBI key and verifying with a real `--mode=test-login`. `config.sh` then picks up `ASPERA_BIN` and `ASPERA_SSH_KEY`. Invoke it directly only to re-provision. If provisioning fails for any reason, submission continues and downloads use the parallel-HTTPS paths.
    >
    > **No key is stored in this repository.** EBI publishes it unauthenticated, but only inside a JavaScript-rendered knowledge-base page: plain HTTP cannot reach it (the layout API carries no article text; the documented KB APIs return 401). The image's first build stage therefore renders the page with headless Chromium and extracts the PEM. Chromium stays in that stage and is not part of the final image. The extraction refuses to guess if the article ever contains more than one distinct key, and the `%test` turns a rotation or page change into a build failure rather than a silent fallback.
    >

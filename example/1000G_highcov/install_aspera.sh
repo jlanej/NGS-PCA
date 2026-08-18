@@ -30,7 +30,7 @@ if [[ -f "${ASPERA_SIF}" ]]; then
   echo "[1/3] Image already built: ${ASPERA_SIF}"
 else
   command -v apptainer &>/dev/null || {
-    echo "ERROR: apptainer not found. Set USE_ASPERA=0 to use the HTTPS path."
+    echo "ERROR: apptainer not found; cannot build the Aspera image."
     exit 1
   }
   echo "[1/3] Building ${ASPERA_SIF} (downloads ~68 MB; runs a login test)..."

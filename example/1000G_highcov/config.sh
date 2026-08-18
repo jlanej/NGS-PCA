@@ -64,31 +64,18 @@ PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_
 PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 
 # EBI/ENA Aspera settings (high-speed FASP transfers — requires system ascp)
-# Install Aspera Connect from https://www.ibm.com/products/aspera/downloads
-# or load it as an HPC module: module load aspera-connect
+#
+# Two things changed at EMBL-EBI and BOTH must be handled, so a site
+# 'module load aspera' will not work on its own:
+#   1. fasp.sra.ebi.ac.uk now runs OpenSSH 8.7 with all SHA-1 key exchange
+#      removed and encrypt-then-MAC MACs only. ascp 3.9.x's libssh2 cannot
+#      negotiate that, and reports the failure misleadingly as
+#      "failed to authenticate" — so changing the -i key does not help.
+#   2. The anonymous key asperaweb_id_dsa.openssh is no longer accepted; EBI
+#      replaced it with an RSA key for its public accounts.
+# 01_download_and_mosdepth.sh provisions both automatically on the submit host
+# via install_aspera.sh; see aspera.def for the full detail.
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data
-#
-# CLIENT VERSION REQUIREMENT: fasp.sra.ebi.ac.uk now runs OpenSSH 8.7 and offers
-# only modern SSH transport algorithms:
-#   KEX  : curve25519-sha256(@libssh.org), ecdh-sha2-nistp{256,384,521},
-#          diffie-hellman-group-exchange-sha256   (all SHA-1 DH removed)
-#   MACs : umac-128-etm@, hmac-sha2-256-etm@, hmac-sha2-512-etm@  (ETM only)
-# ascp 3.9.x bundles a libssh2 that supports neither the AEAD ciphers (which
-# would make the MAC list moot) nor the -etm MACs, so its SSH handshake dies
-# during algorithm negotiation with:
-#   [libssh2] Failure Event: -5 - Unable to exchange encryption keys
-#   ascp: failed to authenticate, exiting.
-# That message is misleading — the transfer never reaches authentication, so
-# swapping the -i key file does NOT help. Upgrade to Aspera Connect 4.2.x.
-#
-# A SECOND change landed alongside that hardening: the anonymous key
-# 'asperaweb_id_dsa.openssh' is NO LONGER ACCEPTED by ENA. Verified directly —
-# same client and server, old key rejected, new key accepted. EBI replaced it
-# with an RSA key for the public accounts, published in KB0011565. So a working
-# setup needs BOTH a >=4.x client and the new key; neither alone is enough.
-#
-# 'bash install_aspera.sh' builds an image providing both (see aspera.def) and
-# writes the 'ascp' wrapper picked up below.
 ASPERA_HOME="${ASPERA_HOME:-${WORK_DIR}/aspera}"
 ASPERA_SIF="${ASPERA_SIF:-${ASPERA_HOME}/aspera.sif}"
 # Falls back to any ascp on PATH, so a working site install is still used.
@@ -102,8 +89,8 @@ fi
 ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${ASPERA_HOME}/etc/ebi_public.key}"
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
-# Set USE_ASPERA=0 to skip ascp entirely (avoids ~2 doomed handshakes and a
-# screenful of FASP log noise per sample when the local client is too old).
+# Set USE_ASPERA=0 to skip Aspera entirely: no image is built, and downloads
+# go straight to the parallel-HTTPS paths below.
 USE_ASPERA="${USE_ASPERA:-1}"
 
 # ── Non-Aspera download tuning ──────────────────────────────────────────────
