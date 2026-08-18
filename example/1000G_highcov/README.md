@@ -17,7 +17,8 @@ The pipeline has four stages, each implemented as a standalone script that can b
 | Stage | Script | What it does | SLURM type |
 |-------|--------|-------------|------------|
 | **0** | `00_setup.sh` | Pull container image, download reference genome, build sample manifest, download sample panel | Interactive / login node |
-| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM via Aspera/wget → run mosdepth → remove CRAM | Array job (3,202 tasks) |
+| — | `install_aspera.sh` | Builds `aspera.def` into `$WORK_DIR` — a current `ascp` plus the EMBL-EBI public key — and verifies by logging in to ENA. **Run automatically by stage 1**; only invoke it directly to re-provision | Interactive / login node |
+| **1** | `01_download_and_mosdepth.sh` | For each sample: download CRAM (Aspera → aria2c → parallel curl → wget) → run mosdepth → remove CRAM | Array job (3,202 tasks) |
 | **2** | `02_run_ngspca.sh` | Run NGS-PCA on all mosdepth results → ~200 PCs | Single large-memory job |
 | **3a** | `03a_mosdepth_coverage_summary.sh` | Compute autosomal coverage stats (mean, median, SD, MAD, IQR) and HQ statistics (non-excluded bins) from mosdepth output | Parallelized (all cores) |
 | **3** | `03_collect_qc.sh` | Aggregate per-sample QC into one table for batch-effect overlay | Interactive or short job |
@@ -28,7 +29,7 @@ All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:lates
 - **mosdepth** v0.3.9 — fast BAM/CRAM depth calculation
 - Pre-built **exclusion BED files** for GRCh38
 
-No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads — the pipeline automatically falls back to `wget` if `ascp` is not available.
+No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads; if it is missing, too old, or disabled via `USE_ASPERA=0`, the pipeline falls back to parallel HTTPS downloads (`aria2c`, else `curl` byte ranges) and finally to single-stream `wget`. See [step 1](#step-1-download--mosdepth-array-job) for the Aspera client version requirement.
 
 ---
 
@@ -162,7 +163,14 @@ bash 01_download_and_mosdepth.sh
 
 Each sample in the task is still processed sequentially as:
 
-1. **Download** the CRAM and CRAI from the ENA using **Aspera** (`ascp`) for high-speed transfer, falling back to `wget` if Aspera fails. Aspera typically achieves 10–100× faster transfers than FTP.
+1. **Download** the CRAM and CRAI from the ENA, trying each transport in descending order of speed and stopping at the first that succeeds:
+
+   | Order | Method | Notes |
+   |---|---|---|
+   | 1 | **Aspera** (`ascp`) | FASP; fastest when the client is new enough (see below). Skip with `USE_ASPERA=0`. |
+   | 2 | **aria2c** | `DOWNLOAD_CONNECTIONS` (default 16) parallel HTTPS streams, resumable. |
+   | 3 | **parallel `curl`** | Same idea using only `curl` byte-range requests, assembled and size-checked. |
+   | 4 | **`wget`** | Single-stream last resort. |
 
    ```
    ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
@@ -172,6 +180,28 @@ Each sample in the task is still processed sequentially as:
    ```
 
    > **Network requirements for Aspera:** TCP port 33001 (outgoing) and UDP port 33001 (both directions) must be open. See [IGSR download FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/) for details.
+
+   > **Aspera client version:** `fasp.sra.ebi.ac.uk` now runs OpenSSH 8.7 and offers only modern SSH transport algorithms — `curve25519-sha256`, `ecdh-sha2-nistp*` and `diffie-hellman-group-exchange-sha256` for key exchange, and *encrypt-then-MAC* MACs only (`umac-128-etm@`, `hmac-sha2-{256,512}-etm@`). The libssh2 bundled with **ascp 3.9.x supports none of these**, so its handshake dies during algorithm negotiation:
+   >
+   > ```
+   > [libssh2] Failure Event: -5 - Unable to exchange encryption keys
+   > ERR [asssh] SSH connection startup failed, err = -5
+   > ascp: failed to authenticate, exiting.
+   > ```
+   >
+   > The final line is misleading: the session never reaches authentication, so **changing the `-i` key file does not help**. This is a *server-side* change — a client that worked for years breaks without being touched.
+   >
+   > **Two things changed, and you need both fixes.** Upgrading the client alone is not enough: the anonymous key `asperaweb_id_dsa.openssh` is **no longer accepted by ENA** either. Verified directly — same client and server, old key rejected, new key accepted. EMBL-EBI replaced it with an RSA key for the public accounts (`fasp-public`, `fasp-ml`, `era-fasp`), documented in [KB0011597](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011597) and [KB0011565](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011565).
+   >
+   > **This is handled for you.** Running `bash 01_download_and_mosdepth.sh` provisions Aspera on the submit host before it submits the array, so there is no extra step to remember. It happens there rather than inside the array tasks because the build downloads ~68 MB and writes one shared `.sif` — hundreds of concurrent tasks would race on it.
+   >
+   > Under the hood that runs `install_aspera.sh`, which builds `aspera.def` into `$WORK_DIR/aspera/aspera.sif`, pairing a checksum-pinned [Aspera Connect 4.2.13](https://www.ibm.com/products/aspera/downloads) with the current EBI key and verifying with a real `--mode=test-login`. `config.sh` then picks up `ASPERA_BIN` and `ASPERA_SSH_KEY`. Invoke it directly only to re-provision. If provisioning fails for any reason, submission continues and downloads use the parallel-HTTPS paths.
+   >
+   > **No key is stored in this repository.** EBI publishes it unauthenticated, but only inside a JavaScript-rendered knowledge-base page: plain HTTP cannot reach it (the layout API carries no article text; the documented KB APIs return 401). The image's first build stage therefore renders the page with headless Chromium and extracts the PEM. Chromium stays in that stage and is not part of the final image. The extraction refuses to guess if the article ever contains more than one distinct key, and the `%test` turns a rotation or page change into a build failure rather than a silent fallback.
+   >
+   > Building from a definition file needs `apptainer build --fakeroot`, which some sites disable. If that is your case, use `USE_ASPERA=0` and the parallel HTTPS paths.
+   >
+   > Until Aspera is provisioned, set `USE_ASPERA=0` to skip the handshake attempts and the FASP log noise — the parallel HTTPS paths are used instead.
 
 2. **Verify** the downloaded CRAM's MD5 checksum against the value in the NYGC sequence index.
 

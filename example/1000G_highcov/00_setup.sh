@@ -120,9 +120,13 @@ else
 
   # Try Aspera first (fast), fall back to wget
   ASPERA_REF_PATH="vol1/ftp/technical/reference/GRCh38_reference_genome/GRCh38_full_analysis_set_plus_decoy_hla.fa"
-  if command -v ascp &>/dev/null; then
+  # Use ASPERA_BIN (config.sh) rather than a bare 'ascp', and require the key:
+  # a stale site module on PATH cannot authenticate to EBI any more, and would
+  # only produce a wall of FASP errors before falling back here anyway.
+  if [[ "${USE_ASPERA}" == "1" ]] && command -v "${ASPERA_BIN}" &>/dev/null \
+     && [[ -s "${ASPERA_SSH_KEY}" ]]; then
     echo "  Using Aspera for high-speed download..."
-    ascp -i "${ASPERA_SSH_KEY}" \
+    "${ASPERA_BIN}" -i "${ASPERA_SSH_KEY}" \
       -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
       "${EBI_ASPERA_USER}:${ASPERA_REF_PATH}" \
       "${REF_DIR}/" || {

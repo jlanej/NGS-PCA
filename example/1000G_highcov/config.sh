@@ -64,12 +64,44 @@ PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_
 PANEL_FILE="${PANEL_FILE:-${WORK_DIR}/igsr_sample_panel.ped}"
 
 # EBI/ENA Aspera settings (high-speed FASP transfers — requires system ascp)
-# Install Aspera Connect from https://www.ibm.com/products/aspera/downloads
-# or load it as an HPC module: module load aspera-connect
+#
+# Two things changed at EMBL-EBI and BOTH must be handled, so a site
+# 'module load aspera' will not work on its own:
+#   1. fasp.sra.ebi.ac.uk now runs OpenSSH 8.7 with all SHA-1 key exchange
+#      removed and encrypt-then-MAC MACs only. ascp 3.9.x's libssh2 cannot
+#      negotiate that, and reports the failure misleadingly as
+#      "failed to authenticate" — so changing the -i key does not help.
+#   2. The anonymous key asperaweb_id_dsa.openssh is no longer accepted; EBI
+#      replaced it with an RSA key for its public accounts.
+# 01_download_and_mosdepth.sh provisions both automatically on the submit host
+# via install_aspera.sh; see aspera.def for the full detail.
 # See: https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data
-ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${HOME}/.aspera/connect/etc/asperaweb_id_dsa.openssh}"
+ASPERA_HOME="${ASPERA_HOME:-${WORK_DIR}/aspera}"
+ASPERA_SIF="${ASPERA_SIF:-${ASPERA_HOME}/aspera.sif}"
+# Falls back to any ascp on PATH, so a working site install is still used.
+if [[ -z "${ASPERA_BIN:-}" ]]; then
+  if [[ -x "${ASPERA_HOME}/bin/ascp" ]]; then
+    ASPERA_BIN="${ASPERA_HOME}/bin/ascp"
+  else
+    ASPERA_BIN="ascp"
+  fi
+fi
+ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${ASPERA_HOME}/etc/ebi_public.key}"
 ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
 ASPERA_PORT=33001
+# Set USE_ASPERA=0 to skip Aspera entirely: no image is built, and downloads
+# go straight to the parallel-HTTPS paths below.
+USE_ASPERA="${USE_ASPERA:-1}"
+
+# ── Non-Aspera download tuning ──────────────────────────────────────────────
+# ENA serves the same paths over HTTPS with Accept-Ranges: bytes, so a single
+# CRAM can be pulled as N concurrent range requests. Measured off-site, 8
+# streams ran ~3x a single stream; on a well-connected HPC node the gain is
+# usually larger. aria2c is preferred when present; otherwise the pipeline
+# falls back to parallel curl ranges, then to single-stream wget.
+DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-16}"
+# Base used to rewrite ftp:// manifest URLs for the HTTP download paths.
+ENA_HTTPS_BASE="${ENA_HTTPS_BASE:-https://ftp.sra.ebi.ac.uk}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
 ENA_ASPERA_USER="era-fasp@fasp.sra.ebi.ac.uk"
 EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"

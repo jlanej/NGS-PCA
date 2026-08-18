@@ -1,0 +1,100 @@
+Bootstrap: docker
+From: debian:bookworm-slim
+Stage: keyfetch
+
+# =============================================================================
+# aspera.def — Apptainer image providing a working ascp for ENA transfers
+#
+#   apptainer build --fakeroot aspera.sif aspera.def
+#
+# Two independent things changed at EMBL-EBI, and both must be handled:
+#
+#   1. fasp.sra.ebi.ac.uk now runs OpenSSH 8.7 offering only curve25519 / ecdh
+#      / DH-GEX-SHA256 key exchange and encrypt-then-MAC MACs. The libssh2 in
+#      ascp 3.9.x supports none of it, so its handshake dies during algorithm
+#      negotiation and ascp misreports that as "failed to authenticate".
+#   2. The old anonymous key asperaweb_id_dsa.openssh is no longer accepted.
+#      EBI replaced it with an RSA key for the public accounts (fasp-public,
+#      fasp-ml, era-fasp), published in KB0011565.
+#
+# This stage reads that key. EBI publishes it unauthenticated but only inside
+# a JavaScript-rendered page — plain HTTP cannot reach it (the layout API
+# carries no article text, and the documented KB APIs return 401) — so it
+# takes a real browser. Chromium stays in this stage and never reaches the
+# final image.
+# =============================================================================
+
+%post
+    set -eu
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        chromium python3 ca-certificates
+    chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+        --virtual-time-budget=30000 \
+        --dump-dom "https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011565" \
+        > /tmp/dom.html
+    python3 - /tmp/dom.html /key <<'PY'
+import html, re, sys
+
+text = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+text = re.sub(r'(?i)<br\s*/?>|</p>|</div>|</li>|</pre>', '\n', text)
+text = re.sub(r'<[^>]+>', '', text)
+text = html.unescape(text)
+
+blocks = re.findall(
+    r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----',
+    text, re.S)
+# The article prints the same key more than once, so dedupe rather than take
+# the first; if EBI ever documents two different keys, stop instead of guessing.
+uniq = sorted({"\n".join(l.strip() for l in b.splitlines() if l.strip()) + "\n"
+               for b in blocks})
+if not uniq:
+    sys.exit('no PEM block in the rendered article -- has the EBI page changed?')
+if len(uniq) > 1:
+    sys.exit('article contains %d different keys; refusing to guess' % len(uniq))
+open(sys.argv[2], 'w').write(uniq[0])
+PY
+    test -s /key
+
+
+Bootstrap: docker
+From: debian:bookworm-slim
+Stage: final
+
+%files from keyfetch
+    /key /opt/aspera/etc/ebi_public.key
+
+%post
+    set -eu
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    VERSION=4.2.13.820
+    SHA256=870885149ccaf57a794b1e8f50885cac8d454768a615e4c11a0f1356872b989e
+    TARBALL=ibm-aspera-connect_${VERSION}_linux_x86_64.tar.gz
+    curl -fsSL --retry 5 --retry-delay 10 -o /tmp/${TARBALL} \
+        "https://d3gcli72yxqn2z.cloudfront.net/downloads/connect/latest/bin/${TARBALL}"
+    echo "${SHA256}  /tmp/${TARBALL}" | sha256sum -c -
+    tar xzf /tmp/${TARBALL} -C /tmp
+    # The installer always targets $HOME/.aspera/connect.
+    HOME=/opt/aspera bash /tmp/ibm-aspera-connect_*.sh
+    rm -rf /tmp/${TARBALL} /tmp/ibm-aspera-connect_*.sh
+
+    chmod 600 /opt/aspera/etc/ebi_public.key
+    test -x /opt/aspera/.aspera/connect/bin/ascp
+
+%environment
+    export PATH=/opt/aspera/.aspera/connect/bin:$PATH
+
+%test
+    # Proves both halves are right before the image is ever used, and turns a
+    # future key rotation or page change into a build failure rather than a
+    # silent fallback to slow downloads.
+    /opt/aspera/.aspera/connect/bin/ascp -L- -P 33001 --mode=test-login \
+        -i /opt/aspera/etc/ebi_public.key era-fasp@fasp.sra.ebi.ac.uk 2>&1 \
+      | grep -q "test login succeeded"
+
+%labels
+    Description Aspera Connect 4.2.13 with the ENA public-account key from EMBL-EBI KB0011565
+    ConnectVersion 4.2.13.820
