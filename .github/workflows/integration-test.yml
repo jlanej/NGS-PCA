@@ -815,3 +815,118 @@ jobs:
             exit 1
           fi
           echo "Identical to upstream ${UPSTREAM_SHA} in both orientations."
+
+  fast-mode-eval-test:
+    # 04_fast_mode_eval.py summarises the mosdepth fast-mode comparison. The
+    # comparison itself needs CRAMs and a cluster; the evaluation is plain
+    # arithmetic on two PC tables and a timing directory, so it is held to
+    # known answers on synthetic fixtures: a sign-flipped PC must read as
+    # perfectly correlated, a perturbed one as slightly less, and paired
+    # timings as their designed speedup.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Syntax-check the pipeline scripts
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          for script in config.sh 01_download_and_mosdepth.sh 04_fast_mode_eval.sh; do
+            bash -n "${script}"
+          done
+          python3 -m py_compile 04_fast_mode_eval.py
+          echo "PASS: scripts parse"
+
+      - name: Build the synthetic fixture
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import math, os
+          S = os.path.join(os.environ["RUNNER_TEMP"], "fastmode_fixture")
+          for d in ("normal", "fast", "timing"):
+              os.makedirs(os.path.join(S, d), exist_ok=True)
+          n, k = 40, 6
+          samples = [f"s{i:03d}." for i in range(n)]
+          pcs = {s: [math.sin((i + 1) * (pc + 1) * 0.7) for pc in range(k)]
+                 for i, s in enumerate(samples)}
+          def write(dirname, transform):
+              with open(f"{S}/{dirname}/svd.pcs.txt", "w") as out:
+                  out.write("SAMPLE\t" + "\t".join(f"PC{p+1}" for p in range(k)) + "\n")
+                  for s in samples:
+                      out.write(s + "\t" + "\t".join(repr(v) for v in transform(pcs[s])) + "\n")
+              with open(f"{S}/{dirname}/svd.singularvalues.txt", "w") as out:
+                  out.write("PC\tSINGULAR_VALUES\n")
+                  for p in range(k):
+                      sv = 100.0 / (p + 1)
+                      if dirname == "fast":
+                          sv *= 1.01
+                      out.write(f"{p+1}\t{sv}\n")
+              with open(f"{S}/{dirname}/svd.bins.txt", "w") as out:
+                  out.write("\n".join(f"chr1:{b*1000+1}-{(b+1)*1000}" for b in range(50)) + "\n")
+          write("normal", lambda v: v)
+          def fast(v):
+              w = list(v)
+              w[1] = -w[1]                                # sign flip: |r| must still be 1
+              w[2] = w[2] + 0.01 * math.cos(sum(v))       # perturbation: |r| just under 1
+              return w
+          write("fast", fast)
+          for i, s in enumerate(samples):
+              first = "normal" if i % 2 == 0 else "fast"
+              for mode, wall in (("normal", 600 + i), ("fast", 300 + i // 2)):
+                  with open(f"{S}/timing/{s}.{mode}.tsv", "w") as out:
+                      out.write(f"{s}\t{mode}\t{first}\t{wall}\t0.3.14\t2\t1000\thost1\t1700000000\n")
+          print("fixture written to", S)
+          EOF
+
+      - name: Run the evaluation without matplotlib and check the answers
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          F="${RUNNER_TEMP}/fastmode_fixture"
+          python3 04_fast_mode_eval.py --normal "$F/normal" --fast "$F/fast" \
+            --timing "$F/timing" --out "$F/out" --pcs 6
+
+          check() { # label actual expected
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1: expected '$3', got '$2'"; exit 1
+            fi
+            echo "PASS: $1 = $2"
+          }
+          COR="$F/out/pc_correlation.tsv"
+          check "PC1 |r|"        "$(awk -F'\t' '$1==1 {print $3}' "$COR")" "1.000000"
+          check "PC2 signed r"   "$(awk -F'\t' '$1==2 {print $2}' "$COR")" "-1.000000"
+          check "PC2 |r|"        "$(awk -F'\t' '$1==2 {print $3}' "$COR")" "1.000000"
+          PC3=$(awk -F'\t' '$1==3 {print $3}' "$COR")
+          awk -v r="$PC3" 'BEGIN { exit !(r >= 0.999 && r < 1.0) }' \
+            || { echo "::error::PC3 |r| should be just under 1, got $PC3"; exit 1; }
+          echo "PASS: PC3 |r| = $PC3 (perturbed, just under 1)"
+
+          check "median speedup" "$(awk -F'\t' '$1=="paired_speedup" {print $3}' "$F/out/timing_summary.tsv")" "2.00"
+          grep -q "Median per-sample speedup" "$F/out/fast_mode_report.md" \
+            || { echo "::error::report is missing the speedup headline"; exit 1; }
+          [ ! -f "$F/out/fast_mode_summary.png" ] \
+            || { echo "::error::a figure appeared without matplotlib"; exit 1; }
+          echo "PASS: tables and report written, figure correctly skipped"
+
+          # structural failure must be an error, not a quiet success
+          if python3 04_fast_mode_eval.py --normal /nonexistent --fast "$F/fast" \
+               --out "$F/out2" > /dev/null 2>&1; then
+            echo "::error::a missing input directory should exit non-zero"; exit 1
+          fi
+          echo "PASS: missing input exits non-zero"
+
+      - name: Run again with matplotlib and check the figure
+        working-directory: example/1000G_highcov
+        run: |
+          set -euo pipefail
+          pip install --quiet matplotlib
+          F="${RUNNER_TEMP}/fastmode_fixture"
+          python3 04_fast_mode_eval.py --normal "$F/normal" --fast "$F/fast" \
+            --timing "$F/timing" --out "$F/out_plot" --pcs 6
+          [ -s "$F/out_plot/fast_mode_summary.png" ] \
+            || { echo "::error::figure was not written with matplotlib installed"; exit 1; }
+          echo "PASS: fast_mode_summary.png written"

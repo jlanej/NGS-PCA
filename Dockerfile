@@ -10,11 +10,15 @@ WORKDIR /app
 
 # --- Bundled tools for end-to-end 1000G high-coverage pipeline -----------
 
-# mosdepth v0.3.9 — fast BAM/CRAM depth calculation (static binary)
-ARG MOSDEPTH_VERSION=0.3.9
+# mosdepth — fast BAM/CRAM depth calculation (static binary), pinned by
+# checksum so a retagged release cannot change what the image computes
+ARG MOSDEPTH_VERSION=0.3.14
+ARG MOSDEPTH_SHA256=c5182b74a8f1b66710efa16e122cbc8a197834874b103e7c5c0bd9a6265ae7b6
 ADD https://github.com/brentp/mosdepth/releases/download/v${MOSDEPTH_VERSION}/mosdepth \
     /usr/local/bin/mosdepth
-RUN chmod +x /usr/local/bin/mosdepth
+RUN echo "${MOSDEPTH_SHA256}  /usr/local/bin/mosdepth" | sha256sum -c - \
+ && chmod +x /usr/local/bin/mosdepth \
+ && mosdepth --version
 
 # --- NGS-PCA application ------------------------------------------------
 

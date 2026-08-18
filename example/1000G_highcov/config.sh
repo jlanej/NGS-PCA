@@ -119,6 +119,20 @@ MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-200}"
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
 MOSDEPTH_THREADS="${MOSDEPTH_THREADS:-2}"
 
+# ── mosdepth fast-mode comparison (optional) ────────────────────────────────
+# COMPARE_FAST_MODE=1 makes 01_download_and_mosdepth.sh run mosdepth twice per
+# sample - once as configured, once with --fast-mode - into two output trees,
+# recording the wall time of each run. Download time is in neither measurement:
+# both runs share the one CRAM the task just downloaded, and their order
+# alternates by manifest line so page-cache warming cannot favour one mode in
+# aggregate. A sample is processed when either tree lacks its output, so every
+# timed pair comes from one node and one download. See the README's
+# "Fast-mode comparison" section; 04_fast_mode_eval.sh evaluates the results.
+COMPARE_FAST_MODE="${COMPARE_FAST_MODE:-0}"
+MOSDEPTH_FAST_DIR="${MOSDEPTH_FAST_DIR:-${WORK_DIR}/mosdepth_output_fast}"
+NGSPCA_FAST_OUTPUT="${NGSPCA_FAST_OUTPUT:-${WORK_DIR}/ngspca_output_fast}"
+MOSDEPTH_TIMING_DIR="${MOSDEPTH_TIMING_DIR:-${QC_OUTPUT}/mosdepth_timing}"
+
 # ── NGS-PCA parameters ──────────────────────────────────────────────────────
 NUM_PC="${NUM_PC:-200}"
 ITERS="${ITERS:-10}"
