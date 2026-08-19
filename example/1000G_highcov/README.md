@@ -629,11 +629,21 @@ globus endpoint search "<your site>"
 globus transfer 47772002-3e5b-4fd3-b97c-18cee38d6df2 <YOUR_COLLECTION_UUID> \
   --batch globus_batch.txt --label "1kG highcov CRAMs" --notify failed,inactive
 
-# 3. Watch it (or use the web app's Activity page)
-globus task list
+# 3. While the transfer runs, dispatch mosdepth as pairs land. The watcher
+#    polls for CRAM+CRAI pairs whose mtimes have settled, submits each one's
+#    mosdepth job with the manifest MD5 (verified on the compute node, in
+#    parallel), and never downloads or deletes anything - so it is safe
+#    alongside the transfer, unlike the manager. A pair dispatched while
+#    secretly still in flight fails its MD5 loudly and is re-dispatched once
+#    it settles again; content that stops changing and still fails is parked.
+bash 01c_dispatch_staged.sh
 
-# 4. When the transfer completes, sweep: every staged file is MD5-verified and
-#    dispatched to mosdepth; anything Globus missed is downloaded as usual
+# 4. Watch the transfer (or the web app's Activity page) and the watcher
+globus task list
+tail -f $WORK_DIR/logs/stagewatch_<JOBID>.out
+
+# 5. When the transfer completes, one final sweep: verifies and dispatches
+#    whatever remains, and downloads anything Globus missed
 bash 01_download_and_mosdepth.sh
 ```
 

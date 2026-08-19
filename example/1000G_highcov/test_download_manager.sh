@@ -221,5 +221,64 @@ grep -q "skipping manifest line 3: whitespace inside a field (sample 'B AD')" "$
   || { echo "FAIL: whitespace warning should name the manifest line"; cat "${T}/generator2.log"; exit 1; }
 echo "PASS: whitespace row skipped with a warning naming manifest line 3"
 
+echo "=== Stage watcher: dispatch on arrival, re-dispatch after premature MD5, park the hopeless ==="
+mkdir -p "${T}/work3/crams"
+python3 - "${T}" <<'EOF'
+import hashlib, sys
+T = sys.argv[1]
+rows = []
+for sample, content in (("W1", b"w1-bytes" * 100), ("W2", b"w2-bytes" * 100), ("W3", b"w3-bytes" * 100)):
+    base = f"ftp://ftp.sra.ebi.ac.uk/vol1/run/E/{sample}.final.cram"
+    md5 = hashlib.md5(content).hexdigest()
+    if sample == "W3":
+        md5 = hashlib.md5(b"never what lands on disk").hexdigest()
+    rows.append(f"{sample}\t{base}\t{base}.crai\t{md5}\tx")
+with open(f"{T}/work3/manifest.tsv", "w") as out:
+    out.write("SAMPLE\tCRAM\tCRAI\tMD5\tNOTES\n")
+    out.write("\n".join(rows) + "\n")
+# W1 fully staged before the watcher starts; W3 staged but forever wrong
+open(f"{T}/work3/crams/W1.cram", "wb").write(b"w1-bytes" * 100)
+open(f"{T}/work3/crams/W1.cram.crai", "wb").write(b"c1")
+open(f"{T}/work3/crams/W3.cram", "wb").write(b"corrupt forever")
+open(f"{T}/work3/crams/W3.cram.crai", "wb").write(b"c3")
+EOF
+
+# W2 arrives mid-run: partial first, completed a few seconds later
+(
+  sleep 2
+  python3 -c "open('${T}/work3/crams/W2.cram','wb').write(b'w2-byt')"
+  python3 -c "open('${T}/work3/crams/W2.cram.crai','wb').write(b'c2')"
+  sleep 3
+  python3 -c "open('${T}/work3/crams/W2.cram','wb').write(b'w2-bytes' * 100)"
+) &
+STAGER_PID=$!
+
+watch_rc=0
+WORK_DIR="${T}/work3" \
+SIF_IMAGE="${T}/work/ngs-pca.sif" \
+REF_DIR="${T}/work/reference" \
+REF_FASTA="${T}/work/reference/ref.fa" \
+MANIFEST="${T}/work3/manifest.tsv" \
+COMPARE_FAST_MODE=1 \
+WATCHER_LOCAL=1 \
+WATCH_INTERVAL=1 \
+WATCH_IDLE_EXIT=0 \
+WATCH_DISPATCH_ATTEMPTS=2 \
+bash "${HERE}/01c_dispatch_staged.sh" > "${T}/watch.log" 2>&1 || watch_rc=$?
+wait "${STAGER_PID}" 2>/dev/null || true
+
+check "watcher exits non-zero when a sample is parked" test "${watch_rc}" -ne 0
+check "W1 dispatched and completed" test -s "${T}/work3/mosdepth_output/W1.by1000.regions.bed.gz"
+check "W2 completed after arriving mid-run" test -s "${T}/work3/mosdepth_output/W2.by1000.regions.bed.gz"
+check "W2 fast tree too" test -s "${T}/work3/mosdepth_output_fast/W2.by1000.regions.bed.gz"
+check "W3 parked" test -f "${T}/work3/download_state/watch/W3.parked"
+check "W3 produced no output" test ! -e "${T}/work3/mosdepth_output/W3.by1000.regions.bed.gz"
+check "W3's staged file was not deleted" test -s "${T}/work3/crams/W3.cram"
+check "completed samples cleaned their CRAMs" test ! -e "${T}/work3/crams/W1.cram"
+check "W2's CRAM and CRAI cleaned after its verified run" \
+  test ! -e "${T}/work3/crams/W2.cram" -a ! -e "${T}/work3/crams/W2.cram.crai"
+grep -q "parking W3" "${T}/watch.log" || { echo "FAIL: parking warning missing"; exit 1; }
+echo "PASS: watcher log explains the parking"
+
 echo ""
 echo "=== All download-manager tests passed ==="

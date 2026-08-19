@@ -34,13 +34,22 @@ else
 fi
 source "${CONFIG_FILE}"
 
-SAMPLE_ID="${1:?usage: 01b_mosdepth_sample.sh SAMPLE_ID MANIFEST_LINE_NUM}"
-LINE_NUM="${2:?usage: 01b_mosdepth_sample.sh SAMPLE_ID MANIFEST_LINE_NUM}"
+SAMPLE_ID="${1:?usage: 01b_mosdepth_sample.sh SAMPLE_ID MANIFEST_LINE_NUM [CRAM_MD5]}"
+LINE_NUM="${2:?usage: 01b_mosdepth_sample.sh SAMPLE_ID MANIFEST_LINE_NUM [CRAM_MD5]}"
+# Optional: when given, the CRAM is verified here before mosdepth. The
+# download manager verifies before submitting and omits it; the stage watcher
+# (01c) passes it, because it dispatches on arrival without reading the file -
+# verification then runs on the compute node, in parallel across jobs.
+CRAM_MD5="${3:-}"
 
 MOSDEPTH_OUTPUT="${MOSDEPTH_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
 MOSDEPTH_FAST_OUTPUT="${MOSDEPTH_FAST_DIR}/${SAMPLE_ID}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
 LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
 LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
+
+# The manager creates this before submitting, but a watcher-dispatched job on
+# a fresh tree must not hand apptainer a bind source that does not exist.
+mkdir -p "${MOSDEPTH_DIR}"
 
 echo "============================================================"
 echo " mosdepth: ${SAMPLE_ID} (manifest line ${LINE_NUM})"
@@ -65,6 +74,18 @@ if [[ ! -s "${LOCAL_CRAM}" || ! -s "${LOCAL_CRAI}" ]]; then
   echo "ERROR: CRAM or CRAI missing for ${SAMPLE_ID} - the download manager verifies both before"
   echo "       submitting this job, so something removed them. Re-run 01_download_and_mosdepth.sh."
   exit 1
+fi
+
+if [[ -n "${CRAM_MD5}" ]]; then
+  echo "Verifying staged CRAM MD5..."
+  ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
+  if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
+    echo "ERROR: staged CRAM failed MD5 (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})."
+    echo "       The transfer may still be in flight - the file is left in place for the"
+    echo "       watcher to re-dispatch once it settles, or for a later manager sweep."
+    exit 1
+  fi
+  echo "  MD5 verified."
 fi
 
 # run_mosdepth <sample> <output_dir> [extra mosdepth flags...]
