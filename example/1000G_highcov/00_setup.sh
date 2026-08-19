@@ -64,6 +64,23 @@ validate_manifest() {
     exit 1
   fi
 
+  # Whitespace inside a field breaks everything the sample name touches -
+  # local file names, Globus batch lines, downstream sample IDs. The builder
+  # trims what it extracts, so a hit here means a damaged row got in some
+  # other way; the EBI index really has shipped "HG03366 " with a trailing
+  # space, which is why this is checked rather than assumed.
+  local dirty
+  dirty="$(awk -F'\t' '
+    NR==1 {next}
+    $1 ~ /[ \r]/ || $2 ~ /[ \r]/ || $3 ~ /[ \r]/ || $4 ~ /[ \r]/ {print NR; exit}
+  ' "${manifest_file}")"
+  if [[ -n "${dirty}" ]]; then
+    echo "ERROR: Manifest has whitespace inside a field at line ${dirty}: ${manifest_file}"
+    echo "  Re-run setup to regenerate it:"
+    echo "    rm -f \"${manifest_file}\" && bash 00_setup.sh"
+    exit 1
+  fi
+
   local nfound
   nfound=$(tail -n +2 "${manifest_file}" | wc -l)
   if (( nfound < MIN_MANIFEST_SAMPLES )); then
@@ -201,17 +218,22 @@ else
     else
       batch_tag="698"
     fi
+    # Fields are trimmed of surrounding whitespace: the EBI index has shipped
+    # at least one sample name with a trailing space ("HG03366 "), and a
+    # carriage return rides the last column of any CRLF row. Untrimmed, either
+    # ends up inside file names and Globus batch lines.
     awk -F'\t' -v batch="${batch_tag}" '
+      function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
       /^#/ { next }
-      $1 ~ /\.cram$/ {
-        sample = $10
-        cram   = $1
-        md5    = $2
+      trim($1) ~ /\.cram$/ {
+        sample = trim($10)
+        cram   = trim($1)
+        md5    = trim($2)
         crai   = cram ".crai"
-        center = ($6  != "") ? $6  : "NA"
-        study  = ($4  != "") ? $4  : "NA"
-        inst   = ($14 != "") ? $14 : "NA"
-        lib    = ($15 != "") ? $15 : "NA"
+        center = (trim($6)  != "") ? trim($6)  : "NA"
+        study  = (trim($4)  != "") ? trim($4)  : "NA"
+        inst   = (trim($14) != "") ? trim($14) : "NA"
+        lib    = (trim($15) != "") ? trim($15) : "NA"
         if (sample != "" && cram != "")
           print sample "\t" cram "\t" crai "\t" md5 "\t" batch "\t" center "\t" study "\t" inst "\t" lib
       }
