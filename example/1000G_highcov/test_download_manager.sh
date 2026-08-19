@@ -131,9 +131,16 @@ run_manager() {
   COMPARE_FAST_MODE=1 \
   DOWNLOADER_LOCAL=1 \
   DOWNLOAD_SLOTS=3 \
-  MAX_LOCAL_CRAMS=10 \
+  MAX_LOCAL_CRAMS="${MAX_LOCAL_CRAMS:-10}" \
   FAKE_REMOTE="${T}/remote" \
   bash "${HERE}/01_download_and_mosdepth.sh"
+}
+
+run_generator() {
+  WORK_DIR="${T}/work" \
+  MANIFEST="${T}/work/manifest.tsv" \
+  COMPARE_FAST_MODE=1 \
+  bash "${HERE}/globus_batch_from_manifest.sh"
 }
 
 check() { # label condition-description: pass a test command as the rest
@@ -161,17 +168,40 @@ check "S5 was re-downloaded before failing" \
   grep -q "re-downloading over HTTPS" "${T}/work/logs/download_S5.log"
 check "distrust flag set by the mismatch" test -f "${T}/work/download_state/aspera_disabled"
 
-echo "=== Sweep 2: S5's remote content fixed ==="
+echo "=== Sweep 2: S5 pre-staged (the Globus workflow), remote gone ==="
+batch="$(run_generator 2> "${T}/generator.log")"
+echo "${batch}" | grep -q "^/vol1/run/ERR5/S5.final.cram ${T}/work/crams/S5.cram$" \
+  || { echo "FAIL: generator batch line"; echo "${batch}"; exit 1; }
+check "generator emits only the needed sample" test "$(echo "${batch}" | wc -l | tr -d '[:space:]')" = "2"
+grep -q "Emitted 1 samples" "${T}/generator.log" || { echo "FAIL: generator summary"; exit 1; }
+echo "PASS: generator emits S5's two files with renames, skips the done four"
+
+# stage what Globus would deliver, with the correct content, and remove the
+# remote copies entirely: a download attempt for S5 would now fail loudly
 python3 - "${T}" <<'EOF'
-import sys
+import os, sys
 T = sys.argv[1]
-with open(f"{T}/remote/S5.final.cram", "wb") as out:
+with open(f"{T}/work/crams/S5.cram", "wb") as out:
     out.write(b"what the manifest thinks S5 is")
+with open(f"{T}/work/crams/S5.cram.crai", "wb") as out:
+    out.write(b"crai5")
+os.remove(f"{T}/remote/S5.final.cram")
+os.remove(f"{T}/remote/S5.final.cram.crai")
 EOF
-run_manager > "${T}/sweep2.log" 2>&1 || { echo "FAIL: sweep 2 should succeed"; cat "${T}/sweep2.log"; exit 1; }
+# MAX_LOCAL_CRAMS=1 with one staged CRAM on disk: the old backpressure would
+# deadlock here; gating only real downloads must let the staged sample through
+MAX_LOCAL_CRAMS=1 run_manager > "${T}/sweep2.log" 2>&1 \
+  || { echo "FAIL: sweep 2 should succeed"; cat "${T}/sweep2.log" "${T}/work/logs/download_S5.log"; exit 1; }
 grep -q "Already done:        4" "${T}/sweep2.log" || { echo "FAIL: sweep 2 skip count"; exit 1; }
 echo "PASS: sweep 2 skips the four finished samples"
-check "S5 healed on the resweep" test -s "${T}/work/mosdepth_output/S5.by1000.regions.bed.gz"
+grep -q "CRAM already present" "${T}/work/logs/download_S5.log" \
+  || { echo "FAIL: staged CRAM should skip the download"; exit 1; }
+grep -q "CRAM: .* download complete" "${T}/work/logs/download_S5.log" \
+  && { echo "FAIL: staged CRAM must not be re-downloaded"; exit 1; }
+grep -q "MD5 verified" "${T}/work/logs/download_S5.log" \
+  || { echo "FAIL: staged CRAM must still be verified"; exit 1; }
+echo "PASS: staged S5 verified and dispatched without downloading, despite MAX_LOCAL_CRAMS=1"
+check "S5 healed via staging" test -s "${T}/work/mosdepth_output/S5.by1000.regions.bed.gz"
 
 echo "=== Sweep 3: nothing left ==="
 run_manager > "${T}/sweep3.log" 2>&1 || { echo "FAIL: sweep 3 should succeed"; exit 1; }

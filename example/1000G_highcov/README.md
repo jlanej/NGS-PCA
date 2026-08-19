@@ -601,9 +601,47 @@ ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
 
 **Firewall requirements:** TCP and UDP port 33001 must be open. See [IGSR FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/) for IP ranges.
 
-### 2. Globus (alternative for restricted networks)
+### 2. Globus (bulk staging — best when direct downloads crawl)
 
-If Aspera ports are blocked, [Globus](https://www.globus.org/) is a reliable alternative. See [IGSR Globus instructions](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/). This requires manual setup outside the pipeline.
+When the manager's own transports are slow or unreliable from your site, [Globus](https://www.globus.org/)
+is usually the fastest path: EBI exposes ENA through the **"EMBL-EBI Public Data"** collection
+(UUID `47772002-3e5b-4fd3-b97c-18cee38d6df2`), with `ftp.sra.ebi.ac.uk` mounted under `/vol1` —
+so every manifest URL is a Globus path with the host stripped
+([ENA docs](https://ena-docs.readthedocs.io/en/latest/retrieval/file-download.html),
+[IGSR FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/)).
+Globus transfers are checksummed, resumed, and retried by the service itself, and run
+endpoint-to-endpoint on data-transfer infrastructure rather than through a compute node.
+
+The pipeline is built to receive this. Staged files named `<SAMPLE>.cram` in `$CRAM_DIR` are
+treated as "already present": the manager skips the download, **still verifies the manifest
+MD5**, and goes straight to spawning mosdepth. `globus_batch_from_manifest.sh` emits a batch
+file that does the renaming during the transfer and lists only samples still needing work:
+
+```bash
+# 1. Generate the batch file (source path, destination path per line)
+bash globus_batch_from_manifest.sh > globus_batch.txt
+
+# 2. Find your site's collection UUID, then submit the transfer
+#    (globus-cli: pip install globus-cli; then globus login)
+globus endpoint search "<your site>"
+globus transfer 47772002-3e5b-4fd3-b97c-18cee38d6df2 <YOUR_COLLECTION_UUID> \
+  --batch globus_batch.txt --label "1kG highcov CRAMs" --notify failed,inactive
+
+# 3. Watch it (or use the web app's Activity page)
+globus task list
+
+# 4. When the transfer completes, sweep: every staged file is MD5-verified and
+#    dispatched to mosdepth; anything Globus missed is downloaded as usual
+bash 01_download_and_mosdepth.sh
+```
+
+Two operational notes. **Stop the manager while Globus writes into `$CRAM_DIR`**
+(`scancel -n 1kG_download`) — two writers racing on the same sample is how partial files
+happen; resweep after the transfer instead. And mind disk: the full cohort staged at once peaks
+near 50 TB in `$CRAM_DIR`, draining as mosdepth jobs finish (the manager's `MAX_LOCAL_CRAMS`
+backpressure deliberately ignores pre-staged files — they consume no new space and dispatching
+them frees it). To stage in waves, `split -l 1000 globus_batch.txt` and submit the pieces as
+separate transfers.
 
 ### 3. wget/FTP (fallback)
 
