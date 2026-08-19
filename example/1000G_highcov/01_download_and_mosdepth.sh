@@ -472,37 +472,49 @@ process_manifest_line() {
     return 0
   fi
 
-  if [[ ! -f "${LOCAL_CRAM}" ]]; then
-    echo "[1/3] Downloading CRAM..."
-    if ! download_file "${CRAM_FTP_URL}" "${LOCAL_CRAM}" "CRAM"; then
-      return 1
+  # A file that fails MD5 - a transfer corrupted in flight, or a partial left
+  # by a killed task and picked up as "already present" - is deleted and
+  # downloaded once more before the task gives up, so one bad file costs a
+  # second transfer rather than a whole task cycle and a resweep.
+  local download_attempt
+  for download_attempt in 1 2; do
+    if [[ ! -f "${LOCAL_CRAM}" ]]; then
+      echo "[1/3] Downloading CRAM..."
+      if ! download_file "${CRAM_FTP_URL}" "${LOCAL_CRAM}" "CRAM"; then
+        return 1
+      fi
+    else
+      echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
     fi
-  else
-    echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
-  fi
 
-  if [[ ! -f "${LOCAL_CRAI}" ]]; then
-    echo "  Downloading CRAI..."
-    if ! download_file "${CRAI_FTP_URL}" "${LOCAL_CRAI}" "CRAI"; then
-      rm -f "${LOCAL_CRAM}"
-      return 1
+    if [[ ! -f "${LOCAL_CRAI}" ]]; then
+      echo "  Downloading CRAI..."
+      if ! download_file "${CRAI_FTP_URL}" "${LOCAL_CRAI}" "CRAI"; then
+        rm -f "${LOCAL_CRAM}"
+        return 1
+      fi
+    else
+      echo "  CRAI already present: ${LOCAL_CRAI}"
     fi
-  else
-    echo "  CRAI already present: ${LOCAL_CRAI}"
-  fi
 
-  # Optional: verify CRAM MD5
-  if [[ -n "${CRAM_MD5}" ]]; then
-    echo "  Verifying CRAM MD5..."
-    ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
-    if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
-      echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
-      echo "  Removing corrupt file and exiting. Re-submit this task to retry."
-      rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-      return 1
+    # Optional: verify CRAM MD5
+    if [[ -n "${CRAM_MD5}" ]]; then
+      echo "  Verifying CRAM MD5..."
+      ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
+      if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
+        echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
+        rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
+        if (( download_attempt == 1 )); then
+          echo "  Removing corrupt file and re-downloading."
+          continue
+        fi
+        echo "  ERROR: MD5 mismatch again after a fresh download. Re-submit this task to retry."
+        return 1
+      fi
+      echo "  MD5 verified."
     fi
-    echo "  MD5 verified."
-  fi
+    break
+  done
 
   # ── Stage 2: Run mosdepth ─────────────────────────────────────────────────
   if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
