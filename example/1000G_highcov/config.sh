@@ -87,7 +87,17 @@ if [[ -z "${ASPERA_BIN:-}" ]]; then
   fi
 fi
 ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${ASPERA_HOME}/etc/ebi_public.key}"
-ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-300m}"
+# Per-task FASP target rate. The aggregate ceiling is this times the number of
+# concurrently running tasks, and it has to fit both the site link and what
+# EBI will serve one site: 200 tasks x 300m asked for 60 Gbit/s and collapsed
+# into packet loss and session timeouts, with sessions crawling at ~13 Mbit/s
+# before dying. 60 tasks x 50m ≈ 3 Gbit/s runs clean; raise one factor only
+# after a wave finishes without timeouts.
+ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-50m}"
+# ascp attempts per file before falling back to HTTPS. Between attempts the
+# partial stays on disk and -k 2 resumes it, so a session that dies 7 GB into
+# a CRAM does not start over.
+ASPERA_RETRIES="${ASPERA_RETRIES:-3}"
 ASPERA_PORT=33001
 # Set USE_ASPERA=0 to skip Aspera entirely: no image is built, and downloads
 # go straight to the parallel-HTTPS paths below.
@@ -96,10 +106,13 @@ USE_ASPERA="${USE_ASPERA:-1}"
 # ── Non-Aspera download tuning ──────────────────────────────────────────────
 # ENA serves the same paths over HTTPS with Accept-Ranges: bytes, so a single
 # CRAM can be pulled as N concurrent range requests. Measured off-site, 8
-# streams ran ~3x a single stream; on a well-connected HPC node the gain is
-# usually larger. aria2c is preferred when present; otherwise the pipeline
-# falls back to parallel curl ranges, then to single-stream wget.
-DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-16}"
+# streams ran ~3x a single stream. aria2c is preferred when present; otherwise
+# the pipeline falls back to parallel curl ranges, then to single-stream wget.
+# This multiplies across the array too - MAX_CONCURRENT_TASKS x this is what
+# ENA sees from the site at once, and 200 x 16 = 3,200 connections got the
+# fallbacks throttled along with FASP. For a single-file use (the reference
+# genome in setup), exporting 16 is reasonable.
+DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-4}"
 # Base used to rewrite ftp:// manifest URLs for the HTTP download paths.
 ENA_HTTPS_BASE="${ENA_HTTPS_BASE:-https://ftp.sra.ebi.ac.uk}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
@@ -113,7 +126,10 @@ EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 SAMPLES_PER_TASK="${SAMPLES_PER_TASK:-1}"
 # Recommended max number of concurrently running array tasks when submitting:
 #   sbatch --array=1-N%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh
-MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-200}"
+# Sized together with ASPERA_BANDWIDTH and DOWNLOAD_CONNECTIONS - see the
+# comments on both. Tasks also spend most of their life in mosdepth, not
+# downloading, so modest download concurrency costs less than it looks.
+MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-60}"
 
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"

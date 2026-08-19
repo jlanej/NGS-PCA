@@ -22,7 +22,7 @@
 #SBATCH --job-name=1kG_mosdepth
 #SBATCH --output=logs/mosdepth_%A_%a.out
 #SBATCH --error=logs/mosdepth_%A_%a.err
-#SBATCH --array=1-3202%200
+#SBATCH --array=1-3202%60
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=12:00:00
@@ -225,21 +225,33 @@ download_aspera() {
     return 1
   fi
 
-  local remote_basename
+  local remote_basename attempt
   remote_basename="$(basename "${aspera_path}")"
   local downloaded="${CRAM_DIR}/${remote_basename}"
-  if ! "${ASPERA_BIN}" -i "${ASPERA_SSH_KEY}" \
-    -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- \
-    "${aspera_user}:${aspera_path}" \
-    "${CRAM_DIR}/"; then
-    # Clean up any partial download left by ascp
-    rm -f "${downloaded}" "${dest}"
-    return 1
-  fi
-  # Rename to the desired local filename if it differs from the remote name
-  if [[ "${downloaded}" != "${dest}" && -f "${downloaded}" ]]; then
-    mv "${downloaded}" "${dest}"
-  fi
+  # -k 2 resumes a partial from an earlier attempt after checksumming the
+  # blocks already on disk. Only ascp may resume its own partials: FASP writes
+  # blocks out of order, so a byte-range transport continuing the file would
+  # seal holes into it, to be caught much later by the MD5 check. That is why
+  # the partial is kept between attempts here and deleted before falling back.
+  for (( attempt = 1; attempt <= ASPERA_RETRIES; attempt++ )); do
+    if "${ASPERA_BIN}" -i "${ASPERA_SSH_KEY}" \
+      -Tr -Q -l "${ASPERA_BANDWIDTH}" -P"${ASPERA_PORT}" -L- -k 2 \
+      "${aspera_user}:${aspera_path}" \
+      "${CRAM_DIR}/"; then
+      # Rename to the desired local filename if it differs from the remote name
+      if [[ "${downloaded}" != "${dest}" && -f "${downloaded}" ]]; then
+        mv "${downloaded}" "${dest}"
+      fi
+      return 0
+    fi
+    if (( attempt < ASPERA_RETRIES )); then
+      echo "  Aspera attempt ${attempt}/${ASPERA_RETRIES} failed; retrying with resume..."
+      sleep 15
+    fi
+  done
+  # Clean up the partial before the byte-range fallbacks
+  rm -f "${downloaded}" "${dest}"
+  return 1
 }
 
 # Rewrite an ENA ftp:// manifest URL to its HTTPS equivalent. ENA serves the

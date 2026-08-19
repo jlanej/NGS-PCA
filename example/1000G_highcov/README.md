@@ -168,16 +168,22 @@ Each sample in the task is still processed sequentially as:
    | Order | Method | Notes |
    |---|---|---|
    | 1 | **Aspera** (`ascp`) | FASP; fastest when the client is new enough (see below). Skip with `USE_ASPERA=0`. |
-   | 2 | **aria2c** | `DOWNLOAD_CONNECTIONS` (default 16) parallel HTTPS streams, resumable. |
+   | 2 | **aria2c** | `DOWNLOAD_CONNECTIONS` (default 4) parallel HTTPS streams, resumable. |
    | 3 | **parallel `curl`** | Same idea using only `curl` byte-range requests, assembled and size-checked. |
    | 4 | **`wget`** | Single-stream last resort. |
 
    ```
    ascp -i ~/.aspera/connect/etc/asperaweb_id_dsa.openssh \
-     -Tr -Q -l 300m -P33001 -L- \
+     -Tr -Q -l 50m -P33001 -L- -k 2 \
      era-fasp@fasp.sra.ebi.ac.uk:vol1/run/ERR323/ERR3239480/NA12718.final.cram \
      /download/
    ```
+
+   The rate is per task, and `ASPERA_BANDWIDTH` × concurrent tasks is the aggregate the site asks
+   of EBI — size it to a few Gbit/s (the defaults, 60 × 50m, are ~3 Gbit/s). Asking for far more
+   is not faster: 200 × 300m collapsed into packet loss, sessions crawling at ~13 Mbit/s, and
+   `Session data transfer timeout` errors — while also getting the HTTPS fallbacks throttled.
+   ascp retries `ASPERA_RETRIES` times before falling back, resuming its partial with `-k 2`.
 
    > **Network requirements for Aspera:** TCP port 33001 (outgoing) and UDP port 33001 (both directions) must be open. See [IGSR download FAQ](https://www.internationalgenome.org/faq/what-tools-can-i-use-to-download-igsr-data/) for details.
 
@@ -235,6 +241,25 @@ squeue -u $USER -n 1kG_mosdepth
 # View logs for a specific task
 cat $WORK_DIR/logs/mosdepth_<JOBID>_<TASKID>.out
 ```
+
+**Triage a wave with failures.** ascp logs to stderr, so FASP error lines in `.err` files do not
+mean failed tasks — a task whose Aspera attempt died may have completed over HTTPS. The `.out`
+files hold the outcomes:
+
+```bash
+# Which transport completed each download
+grep -h ": .* download complete" $WORK_DIR/logs/mosdepth_<JOBID>_*.out | sort | uniq -c
+
+# Tasks that genuinely failed every transport
+grep -l "all download methods failed\|manifest line(s) failed" $WORK_DIR/logs/mosdepth_<JOBID>_*.out | wc -l
+```
+
+No aria2c completions at all usually means it is not installed on the compute nodes
+(`command -v aria2c` there; it is the best HTTPS transport, worth a `module load`). Widespread
+`Session data transfer timeout` with fallbacks failing fast means the aggregate ceiling is set
+too high — see the rate note above — and EBI is throttling the site across all transports.
+Failed samples need no bookkeeping either way: re-running `bash 01_download_and_mosdepth.sh`
+submits only the samples still missing output.
 
 ### Step 2: Run NGS-PCA
 
@@ -506,7 +531,10 @@ bash 00_setup.sh
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
 | `BED_EXCLUDE` | `../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz` (from `config.sh` dir, fallback `/app/resources/...`) | Exclusion BED for NGS-PCA and HQ autosomal coverage stats |
-| `ASPERA_BANDWIDTH` | `300m` | Aspera transfer speed limit |
+| `ASPERA_BANDWIDTH` | `50m` | Per-task FASP target rate; × concurrent tasks = aggregate asked of EBI |
+| `ASPERA_RETRIES` | `3` | ascp attempts per file, resuming the partial with `-k 2`, before HTTPS fallback |
+| `MAX_CONCURRENT_TASKS` | `60` | Concurrent array tasks (`%N`); sized together with the two above |
+| `DOWNLOAD_CONNECTIONS` | `4` | HTTPS range streams per fallback download; × concurrent tasks = connections at ENA |
 
 ---
 
@@ -528,6 +556,9 @@ module load ibm-aspera-connect
 ```
 
 When `ascp` is on `PATH` and `ASPERA_SSH_KEY` points to a valid key, the pipeline uses it automatically for all downloads. If `ascp` is not found, the pipeline falls back to `wget` without any manual intervention.
+
+The `-l 300m` in the manual examples below suits a *single* transfer; the pipeline's per-task
+rate is `ASPERA_BANDWIDTH`, sized so that rate × concurrent tasks stays within a few Gbit/s.
 
 ```bash
 # NYGC CRAMs are on the ENA — use the ENA Aspera user:
