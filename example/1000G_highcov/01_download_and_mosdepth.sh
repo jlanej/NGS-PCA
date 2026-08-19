@@ -1,31 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 01_download_and_mosdepth.sh — Download CRAM, run mosdepth, clean up
+# 01_download_and_mosdepth.sh — Download manager: fetch CRAMs, spawn mosdepth
 # =============================================================================
 #
-# SLURM array job: each task processes one or more samples from the manifest.
-#   1. Download the CRAM + CRAI from ENA via Aspera (falls back to wget)
-#   2. Run mosdepth to compute 1 kb bin coverage
-#   3. Remove the downloaded CRAM/CRAI to free disk space
+# One long-running job downloads the cohort a few samples at a time -
+# DOWNLOAD_SLOTS concurrent transfers, each with the full Aspera->HTTPS
+# fallback chain and MD5 verification - and the moment a sample verifies, its
+# mosdepth run is submitted as an independent SLURM job (01b_mosdepth_sample.sh).
+# The WAN is the scarce, failure-prone resource, so it gets few gentle streams;
+# mosdepth is abundant compute, so its concurrency is whatever the scheduler
+# grants and never holds a download slot.
+#
+# The sweep is idempotent: samples with mosdepth output are skipped, samples
+# whose mosdepth job is already queued or running are skipped, and everything
+# else - including a CRAM already on disk from a dead run - is verified and
+# dispatched. Re-running this script continues where the last sweep stopped.
 #
 # Usage:
-#   # After running 00_setup.sh:
-#   sbatch 01_download_and_mosdepth.sh
-#
-#   # Or process a subset (e.g. first 100 samples):
-#   sbatch --array=1-100 01_download_and_mosdepth.sh
-#
-#   # Retry specific failed tasks:
-#   sbatch --array=42,99,256 01_download_and_mosdepth.sh
+#   bash 01_download_and_mosdepth.sh          # submits the manager as one job
+#   DOWNLOADER_LOCAL=1 bash 01_download_and_mosdepth.sh   # run in place
+#                                             # (login/DTN node, tmux advised)
+#   DOWNLOAD_LIMIT=10 bash 01_download_and_mosdepth.sh    # smoke-test subset
 # =============================================================================
 
-#SBATCH --job-name=1kG_mosdepth
-#SBATCH --output=logs/mosdepth_%A_%a.out
-#SBATCH --error=logs/mosdepth_%A_%a.err
-#SBATCH --array=1-3202%60
+#SBATCH --job-name=1kG_download
+#SBATCH --output=logs/download_manager_%j.out
+#SBATCH --error=logs/download_manager_%j.err
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=4G
-#SBATCH --time=12:00:00
+#SBATCH --mem=8G
+#SBATCH --time=96:00:00
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,8 +48,17 @@ source "${CONFIG_FILE}"
 # This is a no-op when 'module' is not present or 'aspera' is not a module.
 module load aspera 2>/dev/null || true
 
-# Ensure log directory exists
-mkdir -p "${LOG_DIR}"
+mkdir -p "${LOG_DIR}" "${CRAM_DIR}" "${MOSDEPTH_DIR}" "${DOWNLOAD_STATE_DIR}"
+
+# Inside a SLURM job the batch script runs from the spool directory, so 01b is
+# addressed through the repository directory config.sh resolved itself in.
+MOSDEPTH_JOB_SCRIPT="${CONFIG_DIR}/01b_mosdepth_sample.sh"
+
+# Persistent distrust flag: a completed Aspera transfer that failed its MD5 is
+# systematic corruption, not bad luck (measured at 506 of 506 on one cluster),
+# so one bad payload switches the whole run - and later sweeps - to HTTPS.
+# Delete the file to give Aspera another chance.
+ASPERA_DISTRUST_FLAG="${DOWNLOAD_STATE_DIR}/aspera_disabled"
 
 # Returns the expected mosdepth output path for a given sample ID.
 mosdepth_output_path() {
@@ -59,7 +71,7 @@ mosdepth_fast_output_path() {
   echo "${MOSDEPTH_FAST_DIR}/${1}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
 }
 
-# Whether a sample still needs this script to run. With the fast-mode
+# Whether a sample still needs downloading or mosdepth. With the fast-mode
 # comparison on, a sample missing either output is redone in full so that
 # every timed pair comes from one node and one downloaded CRAM.
 needs_processing() {
@@ -71,105 +83,12 @@ needs_processing() {
   fi
 }
 
-if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
-  # ── Pre-submission mode ────────────────────────────────────────────────────
-  # When run directly (not as a SLURM array task), scan the manifest to find
-  # which samples still need mosdepth output, then submit only those tasks.
-  if [[ ! -s "${MANIFEST}" ]]; then
-    echo "ERROR: Manifest missing or empty: ${MANIFEST}"
-    echo "Run setup first: bash 00_setup.sh"
-    exit 1
-  fi
-
-  echo "Pre-submission check: scanning manifest for samples that need processing..."
-  NEEDED_TASKS=()
-  PREV_TASK_ID=""
-  SAMPLE_IDX=0
-  while IFS=$'\t' read -r SAMPLE_ID _; do
-    SAMPLE_IDX=$(( SAMPLE_IDX + 1 ))
-    if needs_processing "${SAMPLE_ID}"; then
-      TASK_ID=$(( (SAMPLE_IDX - 1) / SAMPLES_PER_TASK + 1 ))
-      if [[ "${TASK_ID}" != "${PREV_TASK_ID}" ]]; then
-        NEEDED_TASKS+=("${TASK_ID}")
-        PREV_TASK_ID="${TASK_ID}"
-      fi
-    fi
-  done < <(tail -n +2 "${MANIFEST}")
-
-  TOTAL_SAMPLES=${SAMPLE_IDX}
-  TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
-  NEEDED_COUNT=${#NEEDED_TASKS[@]}
-  ALREADY_DONE=$(( TOTAL_TASKS - NEEDED_COUNT ))
-  echo "  Total samples: ${TOTAL_SAMPLES} (${TOTAL_TASKS} tasks at SAMPLES_PER_TASK=${SAMPLES_PER_TASK})"
-  echo "  Already done:  ${ALREADY_DONE} tasks"
-  echo "  To submit:     ${NEEDED_COUNT} tasks"
-
-  if [[ ${NEEDED_COUNT} -eq 0 ]]; then
-    echo "All samples already have mosdepth output. Nothing to submit."
-    exit 0
-  fi
-
-  # Provision Aspera here, on the submit host, rather than inside the array
-  # tasks: the build downloads ~68 MB and writes one shared .sif, so hundreds
-  # of concurrent tasks would race on it. Array tasks only consume the result,
-  # and fall back to the parallel-HTTPS paths if it is absent.
-  if [[ "${USE_ASPERA}" == "1" && ! -x "${ASPERA_HOME}/bin/ascp" ]]; then
-    echo "Provisioning Aspera (one-time)..."
-    if ! bash "${SCRIPT_DIR}/install_aspera.sh"; then
-      echo "  Continuing without Aspera; downloads will use parallel HTTPS."
-    fi
-  fi
-
-  # Build a compact SLURM array spec (e.g. "1-5,7,9-12") from the needed task IDs.
-  ARRAY_SPEC=""
-  RANGE_START=""
-  PREV_ID=""
-  for TASK_ID in "${NEEDED_TASKS[@]}"; do
-    if [[ -z "${PREV_ID}" ]]; then
-      RANGE_START="${TASK_ID}"
-      PREV_ID="${TASK_ID}"
-    elif (( TASK_ID == PREV_ID + 1 )); then
-      PREV_ID="${TASK_ID}"
-    else
-      [[ -n "${ARRAY_SPEC}" ]] && ARRAY_SPEC+=","
-      if [[ "${RANGE_START}" == "${PREV_ID}" ]]; then
-        ARRAY_SPEC+="${RANGE_START}"
-      else
-        ARRAY_SPEC+="${RANGE_START}-${PREV_ID}"
-      fi
-      RANGE_START="${TASK_ID}"
-      PREV_ID="${TASK_ID}"
-    fi
-  done
-  # Flush the final range.
-  [[ -n "${ARRAY_SPEC}" ]] && ARRAY_SPEC+=","
-  if [[ "${RANGE_START}" == "${PREV_ID}" ]]; then
-    ARRAY_SPEC+="${RANGE_START}"
-  else
-    ARRAY_SPEC+="${RANGE_START}-${PREV_ID}"
-  fi
-
-  echo "Submitting: sbatch --array=${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS} $(basename "${BASH_SOURCE[0]}")"
-  echo "  SLURM logs will be written to: ${LOG_DIR}/mosdepth_<jobid>_<taskid>.{out,err}"
-  exec sbatch \
-    --output="${LOG_DIR}/mosdepth_%A_%a.out" \
-    --error="${LOG_DIR}/mosdepth_%A_%a.err" \
-    --array="${ARRAY_SPEC}%${MAX_CONCURRENT_TASKS}" \
-    "${BASH_SOURCE[0]}"
-fi
-
-if (( SAMPLES_PER_TASK < 1 )); then
-  echo "ERROR: SAMPLES_PER_TASK must be >= 1 (got: ${SAMPLES_PER_TASK})."
-  exit 1
-fi
-
 if [[ ! -s "${MANIFEST}" ]]; then
   echo "ERROR: Manifest missing or empty: ${MANIFEST}"
   echo "Run setup first: bash 00_setup.sh"
   exit 1
 fi
-
-TOTAL_SAMPLES=$(tail -n +2 "${MANIFEST}" | wc -l)
+TOTAL_SAMPLES=$(tail -n +2 "${MANIFEST}" | wc -l | tr -d "[:space:]")
 if (( TOTAL_SAMPLES < MIN_MANIFEST_SAMPLES )); then
   echo "ERROR: Manifest has only ${TOTAL_SAMPLES} samples (minimum expected: ${MIN_MANIFEST_SAMPLES})."
   echo "This likely indicates an incomplete manifest/index download."
@@ -179,27 +98,27 @@ fi
 if (( TOTAL_SAMPLES != EXPECTED_MANIFEST_SAMPLES )); then
   echo "WARNING: Manifest has ${TOTAL_SAMPLES} samples (expected ${EXPECTED_MANIFEST_SAMPLES})."
 fi
-TOTAL_TASKS=$(( (TOTAL_SAMPLES + SAMPLES_PER_TASK - 1) / SAMPLES_PER_TASK ))
-if (( SLURM_ARRAY_TASK_ID > TOTAL_TASKS )); then
-  echo "ERROR: Array task ${SLURM_ARRAY_TASK_ID} exceeds task count (${TOTAL_TASKS}) for ${TOTAL_SAMPLES} samples (SAMPLES_PER_TASK=${SAMPLES_PER_TASK})."
-  echo "Submit with: sbatch --array=1-${TOTAL_TASKS}%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh"
-  exit 1
+
+if [[ -z "${SLURM_JOB_ID:-}" && "${DOWNLOADER_LOCAL:-0}" != "1" ]]; then
+  # ── Submission mode ────────────────────────────────────────────────────────
+  # Provision Aspera on the submit host - the build downloads ~68 MB and
+  # writes one shared .sif, better done once here than inside the job.
+  if [[ "${USE_ASPERA}" == "1" && ! -x "${ASPERA_HOME}/bin/ascp" ]]; then
+    echo "Provisioning Aspera (one-time)..."
+    if ! bash "${SCRIPT_DIR}/install_aspera.sh"; then
+      echo "  Continuing without Aspera; downloads will use parallel HTTPS."
+    fi
+  fi
+  echo "Submitting the download manager (${DOWNLOAD_SLOTS} concurrent downloads)..."
+  echo "  Manager log: ${LOG_DIR}/download_manager_<jobid>.out"
+  echo "  Per-sample download logs: ${LOG_DIR}/download_<sample>.log"
+  exec sbatch \
+    --output="${LOG_DIR}/download_manager_%j.out" \
+    --error="${LOG_DIR}/download_manager_%j.err" \
+    "${BASH_SOURCE[0]}"
 fi
 
-TASK_START=$(( (SLURM_ARRAY_TASK_ID - 1) * SAMPLES_PER_TASK + 1 ))
-TASK_END=$(( TASK_START + SAMPLES_PER_TASK - 1 ))
-if (( TASK_END > TOTAL_SAMPLES )); then
-  TASK_END=${TOTAL_SAMPLES}
-fi
-
-if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
-  mkdir -p "${MOSDEPTH_FAST_DIR}" "${MOSDEPTH_TIMING_DIR}"
-  # recorded in every timing row, so the eval can say what was measured
-  MOSDEPTH_VERSION_STR="$(apptainer exec "${SIF_IMAGE}" mosdepth --version 2>/dev/null | head -1 | awk '{print $NF}')"
-  MOSDEPTH_VERSION_STR="${MOSDEPTH_VERSION_STR:-unknown}"
-fi
-
-# ── Stage 1: Download CRAM + CRAI ───────────────────────────────────────────
+# ── Stage 1 transports ───────────────────────────────────────────────────────
 
 download_aspera() {
   # Download a file via Aspera. Supports both EBI 1000G FTP and ENA SRA FTP URLs.
@@ -210,9 +129,8 @@ download_aspera() {
   local aspera_path aspera_user
 
   [[ "${USE_ASPERA}" == "1" ]] || return 1
-  # Set when a completed Aspera transfer failed its MD5: corruption there is
-  # systematic, not per-file (measured at 506 of 506 on one cluster), so the
-  # rest of the task goes over HTTPS rather than re-verifying it per sample.
+  # File-backed so every download slot, and every later sweep, sees it.
+  [[ -f "${ASPERA_DISTRUST_FLAG}" ]] && return 1
   [[ "${ASPERA_DISABLED:-0}" == "1" ]] && return 1
   # ASPERA_BIN is resolved in config.sh: work-dir install if install_aspera.sh
   # has been run, else whatever ascp is on PATH.
@@ -396,124 +314,57 @@ download_file() {
   return 1
 }
 
-# ── Stage 2 helpers: mosdepth invocation, plain and timed ───────────────────
+# ── One download slot: fetch, verify, hand off to mosdepth ──────────────────
 
-# run_mosdepth <sample> <output_dir> [extra mosdepth flags...]
-run_mosdepth() {
-  local sample="$1" out_dir="$2"
-  shift 2
-  apptainer exec \
-    --bind "${CRAM_DIR}":/crams \
-    --bind "${out_dir}":/mosdepth \
-    --bind "${REF_DIR}":/ref \
-    "${SIF_IMAGE}" \
-    mosdepth \
-      -n \
-      -t "${MOSDEPTH_THREADS}" \
-      --by "${MOSDEPTH_BIN_SIZE}" \
-      --fasta "/ref/$(basename "${REF_FASTA}")" \
-      "$@" \
-      "/mosdepth/${sample}.by${MOSDEPTH_BIN_SIZE}" \
-      "/crams/${sample}.cram"
-}
-
-# timed_mosdepth <sample> <mode> <first_mode> <output_dir> [extra flags...]
-# Wall-clock seconds of the run, written as one headerless row per sample and
-# mode so concurrent array tasks never share a file. Columns:
-#   sample  mode  first_mode  wall_s  mosdepth_version  threads  bin_size  host  epoch
-timed_mosdepth() {
-  local sample="$1" mode="$2" first_mode="$3" out_dir="$4"
-  shift 4
-  local t0 t1
-  t0=$(date +%s)
-  run_mosdepth "${sample}" "${out_dir}" "$@"
-  t1=$(date +%s)
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "${sample}" "${mode}" "${first_mode}" "$(( t1 - t0 ))" \
-    "${MOSDEPTH_VERSION_STR}" "${MOSDEPTH_THREADS}" "${MOSDEPTH_BIN_SIZE}" \
-    "$(hostname)" "${t0}" \
-    > "${MOSDEPTH_TIMING_DIR}/${sample}.${mode}.tsv"
-  echo "  ${mode}: $(( t1 - t0 )) s"
-}
-
-process_manifest_line() {
-  local line_num="$1"
-  local line
-  line=$(sed -n "${line_num}p" "${MANIFEST}")
-  if [[ -z "${line}" ]]; then
-    echo "ERROR: No manifest entry for line ${line_num}"
-    return 1
-  fi
-
-  local SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5
-  # Parse tab-separated manifest columns.
-  IFS=$'\t' read -r SAMPLE_ID CRAM_FTP_URL CRAI_FTP_URL CRAM_MD5 _ <<< "${line}"
-  if [[ -z "${SAMPLE_ID}" || -z "${CRAM_FTP_URL}" || -z "${CRAI_FTP_URL}" ]]; then
-    echo "ERROR: Manifest entry at line ${line_num} is missing required columns."
-    return 1
-  fi
-  if [[ "${CRAM_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* || "${CRAI_FTP_URL}" != "${EXPECTED_FTP_PREFIX}"* ]]; then
-    echo "ERROR: Manifest entry at line ${line_num} has unsupported CRAM/CRAI source."
-    echo "  CRAM: ${CRAM_FTP_URL}"
-    echo "  CRAI: ${CRAI_FTP_URL}"
-    return 1
-  fi
+# download_sample <sample> <line_num> <cram_url> <crai_url> <md5>
+download_sample() {
+  local sample="$1" line_num="$2" cram_url="$3" crai_url="$4" cram_md5="$5"
+  local local_cram="${CRAM_DIR}/${sample}.cram"
+  local local_crai="${CRAM_DIR}/${sample}.cram.crai"
 
   echo "============================================================"
-  echo " Task ${SLURM_ARRAY_TASK_ID}: ${SAMPLE_ID} (manifest line ${line_num})"
-  echo " CRAM: ${CRAM_FTP_URL}"
+  echo " Sample: ${sample} (manifest line ${line_num})"
+  echo " CRAM: ${cram_url}"
   echo " Started: $(date)"
   echo "============================================================"
 
-  # ── Skip if the needed mosdepth output already exists and is non-empty ──────
-  MOSDEPTH_OUTPUT="$(mosdepth_output_path "${SAMPLE_ID}")"
-  MOSDEPTH_FAST_OUTPUT="$(mosdepth_fast_output_path "${SAMPLE_ID}")"
-  LOCAL_CRAM="${CRAM_DIR}/${SAMPLE_ID}.cram"
-  LOCAL_CRAI="${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
-  if ! needs_processing "${SAMPLE_ID}"; then
-    echo "SKIP: mosdepth output already exists: ${MOSDEPTH_OUTPUT}"
-    rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-    return 0
-  fi
-
   # A file that fails MD5 - a transfer corrupted in flight, or a partial left
-  # by a killed task and picked up as "already present" - is deleted and
-  # downloaded once more before the task gives up, so one bad file costs a
-  # second transfer rather than a whole task cycle and a resweep.
-  local download_attempt
+  # by a dead run and picked up as "already present" - is deleted and
+  # downloaded once more before the sample is given up on.
+  local download_attempt actual_md5
   for download_attempt in 1 2; do
-    if [[ ! -f "${LOCAL_CRAM}" ]]; then
-      echo "[1/3] Downloading CRAM..."
-      if ! download_file "${CRAM_FTP_URL}" "${LOCAL_CRAM}" "CRAM"; then
+    if [[ ! -f "${local_cram}" ]]; then
+      echo "[1/2] Downloading CRAM..."
+      if ! download_file "${cram_url}" "${local_cram}" "CRAM"; then
         return 1
       fi
     else
-      echo "[1/3] CRAM already present: ${LOCAL_CRAM}"
+      echo "[1/2] CRAM already present: ${local_cram}"
     fi
 
-    if [[ ! -f "${LOCAL_CRAI}" ]]; then
+    if [[ ! -f "${local_crai}" ]]; then
       echo "  Downloading CRAI..."
-      if ! download_file "${CRAI_FTP_URL}" "${LOCAL_CRAI}" "CRAI"; then
-        rm -f "${LOCAL_CRAM}"
+      if ! download_file "${crai_url}" "${local_crai}" "CRAI"; then
+        rm -f "${local_cram}"
         return 1
       fi
     else
-      echo "  CRAI already present: ${LOCAL_CRAI}"
+      echo "  CRAI already present: ${local_crai}"
     fi
 
-    # Optional: verify CRAM MD5
-    if [[ -n "${CRAM_MD5}" ]]; then
+    # Verify CRAM MD5 when the manifest carries one
+    if [[ -n "${cram_md5}" ]]; then
       echo "  Verifying CRAM MD5..."
-      ACTUAL_MD5=$(md5sum "${LOCAL_CRAM}" | awk '{print $1}')
-      if [[ "${ACTUAL_MD5}" != "${CRAM_MD5}" ]]; then
-        echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
-        rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
+      actual_md5=$(md5sum "${local_cram}" | awk '{print $1}')
+      if [[ "${actual_md5}" != "${cram_md5}" ]]; then
+        echo "  WARNING: MD5 mismatch (expected: ${cram_md5}, got: ${actual_md5})"
+        rm -f "${local_cram}" "${local_crai}"
         if (( download_attempt == 1 )); then
-          ASPERA_DISABLED=1
-          echo "  Removing corrupt file and re-downloading over HTTPS."
+          touch "${ASPERA_DISTRUST_FLAG}"
+          echo "  Removing corrupt file and re-downloading over HTTPS (Aspera distrusted from here on)."
           continue
         fi
-        echo "  ERROR: MD5 mismatch again after a fresh download. Re-submit this task to retry."
+        echo "  ERROR: MD5 mismatch again after a fresh download."
         return 1
       fi
       echo "  MD5 verified."
@@ -521,64 +372,134 @@ process_manifest_line() {
     break
   done
 
-  # ── Stage 2: Run mosdepth ─────────────────────────────────────────────────
-  if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
-    # Both runs use the CRAM this task just downloaded, so download time is in
-    # neither measurement. The order alternates by manifest line: whichever
-    # mode runs second reads a warmer page cache, and alternating cancels that
-    # in aggregate. first_mode is recorded so the eval can check it did.
-    local first_mode=normal
-    (( line_num % 2 == 0 )) && first_mode=fast
-    echo "[2/3] Running mosdepth twice for the fast-mode comparison (${first_mode} first; bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
-    if [[ "${first_mode}" == "normal" ]]; then
-      timed_mosdepth "${SAMPLE_ID}" normal "${first_mode}" "${MOSDEPTH_DIR}"
-      timed_mosdepth "${SAMPLE_ID}" fast "${first_mode}" "${MOSDEPTH_FAST_DIR}" --fast-mode
-    else
-      timed_mosdepth "${SAMPLE_ID}" fast "${first_mode}" "${MOSDEPTH_FAST_DIR}" --fast-mode
-      timed_mosdepth "${SAMPLE_ID}" normal "${first_mode}" "${MOSDEPTH_DIR}"
+  echo "[2/2] Submitting mosdepth job..."
+  local try jobid
+  for try in 1 2 3; do
+    if jobid=$(sbatch --parsable \
+        --job-name="1kG_mosdepth_${sample}" \
+        --output="${LOG_DIR}/mosdepth_${sample}_%j.out" \
+        --error="${LOG_DIR}/mosdepth_${sample}_%j.err" \
+        --cpus-per-task="${MOSDEPTH_THREADS}" \
+        --mem="${MOSDEPTH_MEM}" \
+        --time="${MOSDEPTH_TIME}" \
+        "${MOSDEPTH_JOB_SCRIPT}" "${sample}" "${line_num}"); then
+      echo "  mosdepth job ${jobid} submitted for ${sample}."
+      return 0
     fi
-    if [[ ! -f "${MOSDEPTH_OUTPUT}" || ! -f "${MOSDEPTH_FAST_OUTPUT}" ]]; then
-      echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT} and/or ${MOSDEPTH_FAST_OUTPUT}"
-      return 1
-    fi
-    echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
-    echo "  mosdepth complete: ${MOSDEPTH_FAST_OUTPUT}"
-  else
-    echo "[2/3] Running mosdepth (bin size: ${MOSDEPTH_BIN_SIZE} bp, threads: ${MOSDEPTH_THREADS})..."
-
-    run_mosdepth "${SAMPLE_ID}" "${MOSDEPTH_DIR}"
-
-    # Verify output was created
-    if [[ ! -f "${MOSDEPTH_OUTPUT}" ]]; then
-      echo "ERROR: mosdepth output not found: ${MOSDEPTH_OUTPUT}"
-      return 1
-    fi
-    echo "  mosdepth complete: ${MOSDEPTH_OUTPUT}"
-  fi
-
-  # ── Stage 3: Clean up CRAM/CRAI ───────────────────────────────────────────
-  echo "[3/3] Cleaning up downloaded CRAM/CRAI..."
-  rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
-  echo "  Removed: ${LOCAL_CRAM}"
-  echo "  Removed: ${LOCAL_CRAI}"
-
-  echo ""
-  echo "============================================================"
-  echo " Task ${SLURM_ARRAY_TASK_ID} (${SAMPLE_ID}) complete."
-  echo " Finished: $(date)"
-  echo "============================================================"
+    echo "  sbatch failed (attempt ${try}/3); retrying in 30 s..."
+    sleep 30
+  done
+  echo "  ERROR: could not submit the mosdepth job for ${sample}; the verified CRAM is kept"
+  echo "         and the next sweep will dispatch it without re-downloading."
+  return 1
 }
 
-echo "Task ${SLURM_ARRAY_TASK_ID} will process manifest sample indices ${TASK_START}-${TASK_END} of ${TOTAL_SAMPLES} (SAMPLES_PER_TASK=${SAMPLES_PER_TASK})."
-FAILED_LINES=()
-for SAMPLE_IDX in $(seq "${TASK_START}" "${TASK_END}"); do
-  LINE_NUM=$(( SAMPLE_IDX + 1 ))
-  if ! process_manifest_line "${LINE_NUM}"; then
-    FAILED_LINES+=("${LINE_NUM}")
-  fi
-done
+# ── Manager ──────────────────────────────────────────────────────────────────
 
-if (( ${#FAILED_LINES[@]} > 0 )); then
-  echo "ERROR: ${#FAILED_LINES[@]} manifest line(s) failed in task ${SLURM_ARRAY_TASK_ID}: ${FAILED_LINES[*]}"
-  exit 1
+RESULT_DIR="${DOWNLOAD_STATE_DIR}/results"
+rm -rf "${RESULT_DIR}"
+mkdir -p "${RESULT_DIR}"
+
+# One scheduler snapshot: samples whose mosdepth job is already queued or
+# running are not re-dispatched, so a manager restart cannot double-download.
+# A file rather than an associative array keeps this bash-3 clean.
+IN_FLIGHT_FILE="${DOWNLOAD_STATE_DIR}/in_flight.$$"
+: > "${IN_FLIGHT_FILE}"
+if command -v squeue &>/dev/null; then
+  squeue -h -u "${USER:-$(id -un)}" -o "%j" 2>/dev/null \
+    | sed -n 's/^1kG_mosdepth_//p' > "${IN_FLIGHT_FILE}" || true
 fi
+
+NEEDED_LINES=()
+NEEDED_SAMPLES=()
+SKIPPED_DONE=0
+SKIPPED_IN_FLIGHT=0
+LINE_NUM=1
+while IFS=$'\t' read -r SAMPLE_ID CRAM_URL CRAI_URL CRAM_MD5 _; do
+  LINE_NUM=$(( LINE_NUM + 1 ))   # manifest line, counting its header
+  [[ -z "${SAMPLE_ID}" ]] && continue
+  if ! needs_processing "${SAMPLE_ID}"; then
+    SKIPPED_DONE=$(( SKIPPED_DONE + 1 ))
+    continue
+  fi
+  if grep -qxF "${SAMPLE_ID}" "${IN_FLIGHT_FILE}"; then
+    SKIPPED_IN_FLIGHT=$(( SKIPPED_IN_FLIGHT + 1 ))
+    continue
+  fi
+  if [[ "${CRAM_URL}" != "${EXPECTED_FTP_PREFIX}"* || "${CRAI_URL}" != "${EXPECTED_FTP_PREFIX}"* ]]; then
+    echo "ERROR: Manifest entry at line ${LINE_NUM} has unsupported CRAM/CRAI source: ${CRAM_URL}"
+    echo "fail" > "${RESULT_DIR}/${SAMPLE_ID}"
+    continue
+  fi
+  NEEDED_LINES+=("${LINE_NUM}")
+  NEEDED_SAMPLES+=("${SAMPLE_ID}")
+done < <(tail -n +2 "${MANIFEST}")
+rm -f "${IN_FLIGHT_FILE}"
+
+echo "Download manager: ${TOTAL_SAMPLES} samples in the manifest."
+echo "  Already done:        ${SKIPPED_DONE}"
+echo "  mosdepth in flight:  ${SKIPPED_IN_FLIGHT}"
+echo "  To download:         ${#NEEDED_LINES[@]} (${DOWNLOAD_SLOTS} at a time)"
+if (( DOWNLOAD_LIMIT > 0 )); then
+  echo "  DOWNLOAD_LIMIT=${DOWNLOAD_LIMIT}: stopping after that many dispatches."
+fi
+
+if (( ${#NEEDED_LINES[@]} == 0 )); then
+  echo "Nothing to download."
+  exit 0
+fi
+
+DISPATCHED=0
+for idx in "${!NEEDED_LINES[@]}"; do
+  if (( DOWNLOAD_LIMIT > 0 && DISPATCHED >= DOWNLOAD_LIMIT )); then
+    break
+  fi
+
+  # Keep at most DOWNLOAD_SLOTS transfers running. Polling rather than
+  # wait -n: transfers run for minutes, and bash older than 4.3 has no wait -n.
+  while (( $(jobs -rp | wc -l) >= DOWNLOAD_SLOTS )); do
+    sleep 2
+  done
+
+  # Disk backpressure: a stalled mosdepth queue must not fill scratch. Only
+  # completed jobs delete their CRAMs, so the count of *.cram files bounds
+  # local usage at roughly MAX_LOCAL_CRAMS x 16 GB.
+  while (( $(find "${CRAM_DIR}" -maxdepth 1 -name "*.cram" 2>/dev/null | wc -l) >= MAX_LOCAL_CRAMS )); do
+    echo "Backpressure: ${MAX_LOCAL_CRAMS} CRAMs on disk await mosdepth; pausing downloads for 60 s..."
+    sleep 60
+  done
+
+  line_num="${NEEDED_LINES[${idx}]}"
+  sample="${NEEDED_SAMPLES[${idx}]}"
+  line=$(sed -n "${line_num}p" "${MANIFEST}")
+  IFS=$'\t' read -r _ CRAM_URL CRAI_URL CRAM_MD5 _ <<< "${line}"
+
+  echo "[$(date '+%H:%M:%S')] slot -> ${sample} (log: ${LOG_DIR}/download_${sample}.log)"
+  (
+    if download_sample "${sample}" "${line_num}" "${CRAM_URL}" "${CRAI_URL}" "${CRAM_MD5}"; then
+      echo "ok" > "${RESULT_DIR}/${sample}"
+    else
+      echo "fail" > "${RESULT_DIR}/${sample}"
+    fi
+  ) > "${LOG_DIR}/download_${sample}.log" 2>&1 &
+  DISPATCHED=$(( DISPATCHED + 1 ))
+done
+wait || true
+
+OK_COUNT=$(grep -lx "ok" "${RESULT_DIR}"/* 2>/dev/null | wc -l | tr -d "[:space:]") || true
+FAIL_COUNT=$(grep -lx "fail" "${RESULT_DIR}"/* 2>/dev/null | wc -l | tr -d "[:space:]") || true
+echo ""
+echo "============================================================"
+echo " Download sweep finished: ${OK_COUNT} dispatched to mosdepth, ${FAIL_COUNT} failed."
+if (( FAIL_COUNT > 0 )); then
+  echo " Failed samples (see ${LOG_DIR}/download_<sample>.log):"
+  grep -lx "fail" "${RESULT_DIR}"/* | while IFS= read -r f; do echo "   $(basename "${f}")"; done
+  echo " Re-run this script to retry them."
+fi
+if [[ -f "${ASPERA_DISTRUST_FLAG}" ]]; then
+  echo " NOTE: Aspera is distrusted (a completed transfer failed MD5); downloads are HTTPS-only."
+  echo "       Remove ${ASPERA_DISTRUST_FLAG} to try Aspera again."
+fi
+echo " mosdepth jobs run independently; watch them with: squeue -u \$USER -n 1kG_download; squeue -u \$USER | grep 1kG_mosdepth"
+echo "============================================================"
+(( FAIL_COUNT == 0 )) || exit 1

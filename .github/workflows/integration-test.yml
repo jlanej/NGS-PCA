@@ -835,7 +835,8 @@ jobs:
         working-directory: example/1000G_highcov
         run: |
           set -euo pipefail
-          for script in config.sh 01_download_and_mosdepth.sh 04_fast_mode_eval.sh; do
+          for script in config.sh 01_download_and_mosdepth.sh 01b_mosdepth_sample.sh \
+                        04_fast_mode_eval.sh test_download_manager.sh; do
             bash -n "${script}"
           done
           python3 -m py_compile 04_fast_mode_eval.py
@@ -957,3 +958,23 @@ jobs:
               || { echo "::error::$figure was not written with matplotlib installed"; exit 1; }
           done
           echo "PASS: fast_mode_summary.png and fast_mode_qc.png written"
+
+  download-manager-test:
+    # The download manager and the mosdepth jobs it spawns, exercised
+    # hermetically: sbatch runs 01b inline, squeue reports nothing, apptainer
+    # fakes mosdepth, wget serves a local store, and curl/aria2c fail so
+    # nothing touches the network. Five samples, one corrupt: the corrupt one
+    # must be re-downloaded once and then fail, the rest must reach both
+    # mosdepth trees with timing rows and cleaned-up CRAMs, and a resweep must
+    # heal the failure and then become a no-op.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run the hermetic manager test
+        working-directory: example/1000G_highcov
+        run: bash test_download_manager.sh "${RUNNER_TEMP}/dlmgr_test"
