@@ -29,7 +29,7 @@ All three stages use the **same container image** (`ghcr.io/jlanej/ngs-pca:lates
 - **mosdepth** v0.3.9 — fast BAM/CRAM depth calculation
 - Pre-built **exclusion BED files** for GRCh38
 
-No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads; if it is missing, too old, or disabled via `USE_ASPERA=0`, the pipeline falls back to parallel HTTPS downloads (`aria2c`, else `curl` byte ranges) and finally to single-stream `wget`. See [step 1](#step-1-download--mosdepth-array-job) for the Aspera client version requirement.
+No additional software installation is required beyond [Apptainer](https://apptainer.org/) (Singularity). IBM Aspera Connect (`ascp`) is an optional system-level tool for faster downloads; if it is missing, too old, or disabled via `USE_ASPERA=0`, the pipeline falls back to parallel HTTPS downloads (`aria2c`, else `curl` byte ranges) and finally to single-stream `wget`. See [step 1](#step-1-download-manager--spawned-mosdepth-jobs) for the Aspera client version requirement.
 
 ---
 
@@ -58,8 +58,8 @@ export WORK_DIR=/scratch/$USER/1000G_highcov
 # 2. Run one-time setup (login node — ~30 min with Aspera, longer via FTP)
 bash 00_setup.sh
 
-# 3. Submit the download + mosdepth array job
-sbatch 01_download_and_mosdepth.sh
+# 3. Start the download manager; it spawns one mosdepth job per verified sample
+bash 01_download_and_mosdepth.sh
 
 # 4. Once all 3,202 tasks finish, submit the NGS-PCA job
 sbatch 02_run_ngspca.sh
@@ -145,23 +145,34 @@ This script performs four tasks:
    ...
    ```
 
-### Step 1: Download + mosdepth (array job)
+### Step 1: Download manager + spawned mosdepth jobs
 
 ```bash
 bash 01_download_and_mosdepth.sh
 ```
 
-This script first scans the manifest and checks which samples already have mosdepth output. It then submits a SLURM array job covering only the tasks that still need to run, skipping samples that are already complete. This avoids wasting queue slots on already-finished work.
+This submits **one long-running download manager job**. The manager holds `DOWNLOAD_SLOTS`
+(default 6) concurrent transfers — the WAN is the scarce, failure-prone resource, and few fast
+streams beat many starved ones — and the moment a sample's CRAM verifies, its mosdepth run is
+submitted as an independent job (`01b_mosdepth_sample.sh`, name `1kG_mosdepth_<sample>`), so
+mosdepth concurrency is whatever the scheduler grants and never waits on a download slot.
 
-By default each task processes one sample, but you can batch multiple samples per task with `SAMPLES_PER_TASK`:
+The sweep is idempotent three ways: samples with mosdepth output are skipped, samples whose
+mosdepth job is already queued or running are skipped (one `squeue` snapshot at start), and a
+verified CRAM already on disk is reused without re-downloading. Re-running the script continues
+where the last sweep stopped. The manager pauses when `MAX_LOCAL_CRAMS` CRAMs sit on disk
+awaiting mosdepth, so a stalled queue cannot fill scratch, and it exits non-zero if any sample
+failed, listing them.
 
 ```bash
-# Batch 4 samples per task + throttle to 20 concurrent tasks
-export SAMPLES_PER_TASK=4
-bash 01_download_and_mosdepth.sh
+# Smoke-test with the first 10 samples that need work
+DOWNLOAD_LIMIT=10 bash 01_download_and_mosdepth.sh
+
+# Run the manager in place instead of as a job (login/DTN node; tmux advised)
+DOWNLOADER_LOCAL=1 bash 01_download_and_mosdepth.sh
 ```
 
-Each sample in the task is still processed sequentially as:
+Each sample is processed as:
 
 1. **Download** the CRAM and CRAI from the ENA, trying each transport in descending order of speed and stopping at the first that succeeds:
 
@@ -199,7 +210,7 @@ Each sample in the task is still processed sequentially as:
    >
    > **Two things changed, and you need both fixes.** Upgrading the client alone is not enough: the anonymous key `asperaweb_id_dsa.openssh` is **no longer accepted by ENA** either. Verified directly — same client and server, old key rejected, new key accepted. EMBL-EBI replaced it with an RSA key for the public accounts (`fasp-public`, `fasp-ml`, `era-fasp`), documented in [KB0011597](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011597) and [KB0011565](https://embl.service-now.com/kb?id=kb_article_view&sysparm_article=KB0011565).
    >
-   > **This is handled for you.** Running `bash 01_download_and_mosdepth.sh` provisions Aspera on the submit host before it submits the array, so there is no extra step to remember. It happens there rather than inside the array tasks because the build downloads ~68 MB and writes one shared `.sif` — hundreds of concurrent tasks would race on it.
+   > **This is handled for you.** Running `bash 01_download_and_mosdepth.sh` provisions Aspera on the submit host before it submits the manager job, so there is no extra step to remember.
    >
    > Under the hood that runs `install_aspera.sh`, which builds `aspera.def` into `$WORK_DIR/aspera/aspera.sif`, pairing a checksum-pinned [Aspera Connect 4.2.13](https://www.ibm.com/products/aspera/downloads) with the current EBI key and verifying with a real `--mode=test-login`. `config.sh` then picks up `ASPERA_BIN` and `ASPERA_SSH_KEY`. Invoke it directly only to re-provision. If provisioning fails for any reason, submission continues and downloads use the parallel-HTTPS paths.
    >
@@ -210,24 +221,20 @@ Each sample in the task is still processed sequentially as:
    > Until Aspera is provisioned, set `USE_ASPERA=0` to skip the handshake attempts and the FASP log noise — the parallel HTTPS paths are used instead.
 
 2. **Verify** the downloaded CRAM's MD5 checksum against the value in the NYGC sequence index.
+   A mismatch deletes the pair and re-downloads once — over HTTPS, since a completed Aspera
+   transfer that fails MD5 means systematic corruption, which also sets a persistent distrust
+   flag (`$DOWNLOAD_STATE_DIR/aspera_disabled`) that keeps the whole run and later sweeps off
+   Aspera until the file is removed.
 
-3. **Run mosdepth** in 1 kb bins:
+3. **Spawn mosdepth** as its own job the moment verification passes (twice, timed, when
+   `COMPARE_FAST_MODE=1`):
 
    ```
    mosdepth -n -t 2 --by 1000 --fasta GRCh38.fa output_prefix input.cram
    ```
 
-4. **Remove** the CRAM and CRAI to free disk space. Only the mosdepth output (`*.regions.bed.gz`, ~15 MB per sample) is retained.
-
-**To process a subset** (e.g. for testing):
-
-```bash
-# First 10 samples only
-sbatch --array=1-10 01_download_and_mosdepth.sh
-
-# Retry specific failed tasks
-sbatch --array=42,99,256 01_download_and_mosdepth.sh
-```
+4. The mosdepth job **removes** the CRAM and CRAI when it finishes. Only the mosdepth output
+   (`*.regions.bed.gz`, ~15 MB per sample) is retained.
 
 **Monitor progress:**
 
@@ -235,44 +242,46 @@ sbatch --array=42,99,256 01_download_and_mosdepth.sh
 # Check how many samples are complete
 ls $WORK_DIR/mosdepth_output/*.regions.bed.gz | wc -l
 
-# Check SLURM job status
-squeue -u $USER -n 1kG_mosdepth
+# The manager and the mosdepth jobs it has spawned
+squeue -u $USER -n 1kG_download
+squeue -u $USER | grep 1kG_mosdepth
 
-# View logs for a specific task
-cat $WORK_DIR/logs/mosdepth_<JOBID>_<TASKID>.out
+# The manager's narration, one line per dispatch
+tail -f $WORK_DIR/logs/download_manager_<JOBID>.out
+
+# One sample's download story, or its mosdepth job
+cat $WORK_DIR/logs/download_<SAMPLE>.log
+cat $WORK_DIR/logs/mosdepth_<SAMPLE>_<JOBID>.out
 ```
 
-**Triage a wave with failures.** ascp logs to stderr, so FASP error lines in `.err` files do not
-mean failed tasks — a task whose Aspera attempt died may have completed over HTTPS. The `.out`
-files hold the outcomes:
+**Triage failures.** The manager's summary lists failed samples and exits non-zero when any
+exist; each failure's full story is in its own `download_<SAMPLE>.log` (ascp logs its FASP noise
+there too — an ERR line does not mean the sample failed if a fallback then succeeded). Re-running
+`bash 01_download_and_mosdepth.sh` retries exactly the samples still missing output.
 
 ```bash
 # Which transport completed each download
-grep -h ": .* download complete" $WORK_DIR/logs/mosdepth_<JOBID>_*.out | sort | uniq -c
+grep -h ": .* download complete" $WORK_DIR/logs/download_*.log | sort | uniq -c
 
-# Tasks that genuinely failed every transport
-grep -l "all download methods failed\|manifest line(s) failed" $WORK_DIR/logs/mosdepth_<JOBID>_*.out | wc -l
+# Samples that failed every transport in the last sweep
+grep -rlx "fail" $WORK_DIR/download_state/results | wc -l
 ```
 
-No aria2c completions at all usually means it is not installed on the compute nodes
-(`command -v aria2c` there; it is the best HTTPS transport, worth a `module load`). Widespread
-`Session data transfer timeout` with fallbacks failing fast means the aggregate ceiling is set
-too high — see the rate note above — and EBI is throttling the site across all transports.
-Failed samples need no bookkeeping either way: re-running `bash 01_download_and_mosdepth.sh`
-submits only the samples still missing output.
-
-When tasks fail *after* downloading, attribute the MD5 mismatches to a transport:
+No aria2c completions at all usually means it is not installed on the node running the manager
+(`command -v aria2c`; it is the best HTTPS transport, worth a `module load`). MD5 mismatches are
+attributed the same way:
 
 ```bash
-for f in $(grep -l "MD5 mismatch" $WORK_DIR/logs/mosdepth_<JOBID>_*.out); do
+for f in $(grep -l "MD5 mismatch" $WORK_DIR/logs/download_*.log); do
   grep -m1 -o "CRAM: .* download complete" "$f"
 done | sort | uniq -c
 ```
 
-A scattering across transports is transfer noise the in-task re-download absorbs. Mismatches on
+A scattering across transports is transfer noise the in-sweep re-download absorbs. Mismatches on
 essentially **every** Aspera transfer while HTTPS runs clean is a different animal — systematic
-payload corruption with ascp exiting success (measured once at 506 of 506) — and the wave should
-run with `USE_ASPERA=0` while that is investigated on the host.
+payload corruption with ascp exiting success (measured once at 506 of 506). The distrust flag
+handles it automatically from the first occurrence; set `USE_ASPERA=0` to skip even the first
+wasted transfer while it is investigated on the host.
 
 ### Step 2: Run NGS-PCA
 
@@ -312,8 +321,8 @@ correlation is the expectation — and if it holds, fast mode is a free speedup 
 expensive stage.
 
 ```bash
-# 1. Rerun step 1 with the comparison on: each task runs mosdepth twice per
-#    sample (standard -> mosdepth_output/, fast -> mosdepth_output_fast/),
+# 1. Rerun step 1 with the comparison on: each sample's mosdepth job runs
+#    mosdepth twice (standard -> mosdepth_output/, fast -> mosdepth_output_fast/),
 #    recording each run's wall time. Downloads are shared and untimed; the two
 #    runs alternate order so cache warming cancels out in aggregate.
 export COMPARE_FAST_MODE=1
@@ -544,10 +553,13 @@ bash 00_setup.sh
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
 | `NGSPCA_THREADS` | `32` | Threads for loading BED files |
 | `BED_EXCLUDE` | `../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz` (from `config.sh` dir, fallback `/app/resources/...`) | Exclusion BED for NGS-PCA and HQ autosomal coverage stats |
-| `ASPERA_BANDWIDTH` | `50m` | Per-task FASP target rate; × concurrent tasks = aggregate asked of EBI |
+| `ASPERA_BANDWIDTH` | `100m` | Per-transfer FASP target rate; × `DOWNLOAD_SLOTS` = aggregate asked of EBI |
 | `ASPERA_RETRIES` | `3` | ascp attempts per file, resuming the partial with `-k 2`, before HTTPS fallback |
-| `MAX_CONCURRENT_TASKS` | `60` | Concurrent array tasks (`%N`); sized together with the two above |
-| `DOWNLOAD_CONNECTIONS` | `4` | HTTPS range streams per fallback download; × concurrent tasks = connections at ENA |
+| `DOWNLOAD_SLOTS` | `6` | Concurrent transfers held by the download manager |
+| `DOWNLOAD_CONNECTIONS` | `16` | HTTPS range streams per download; × `DOWNLOAD_SLOTS` = connections at ENA |
+| `MAX_LOCAL_CRAMS` | `60` | Downloads pause while this many CRAMs await mosdepth (~16 GB each) |
+| `DOWNLOAD_LIMIT` | `0` | Stop the sweep after this many dispatches (0 = whole manifest) |
+| `MOSDEPTH_MEM` / `MOSDEPTH_TIME` | `8G` / `06:00:00` | Resources for each spawned mosdepth job |
 
 ---
 
@@ -605,23 +617,14 @@ wget ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR323/ERR3239480/NA12718.final.cram
 
 ## Adapting for other schedulers
 
-The `#SBATCH` directives in `01_download_and_mosdepth.sh` and `02_run_ngspca.sh` target SLURM. To adapt for PBS/Torque, SGE, or LSF, replace the `#SBATCH` header. The rest of each script runs unchanged.
-
-<details>
-<summary>PBS/Torque example</summary>
-
-```bash
-#PBS -N 1kG_mosdepth
-#PBS -o logs/mosdepth.out
-#PBS -e logs/mosdepth.err
-#PBS -t 1-3202
-#PBS -l nodes=1:ppn=2,mem=4gb,walltime=04:00:00
-
-# Replace SLURM_ARRAY_TASK_ID with PBS_ARRAYID
-SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
-```
-
-</details>
+The `#SBATCH` headers target SLURM, and the download manager submits its per-sample mosdepth
+jobs with one `sbatch` call (in `download_sample`, `01_download_and_mosdepth.sh`) plus a
+`squeue` snapshot for its in-flight check. On PBS/SGE/LSF: run the manager in place with
+`DOWNLOADER_LOCAL=1` (a login or DTN node suffices — it only downloads), replace that `sbatch`
+call with your scheduler's equivalent (`qsub`/`bsub` wrapping `01b_mosdepth_sample.sh SAMPLE
+LINE`), and either translate the in-flight check or leave it — without `squeue` the manager
+still skips every sample whose output exists, it just cannot see jobs that are queued but not
+yet finished. `02_run_ngspca.sh` needs only its header translated.
 
 ---
 
@@ -632,10 +635,9 @@ SLURM_ARRAY_TASK_ID=${PBS_ARRAYID}
 | Aspera download fails | Check that TCP/UDP port 33001 is open. The script falls back to wget automatically. |
 | `mosdepth: error: could not load index` | Ensure the CRAI file was downloaded alongside the CRAM. |
 | `OutOfMemoryError` in step 02 | Increase `--mem` in the SLURM directive and/or set `-Xmx` via `JAVA_TOOL_OPTIONS`. |
-| Fewer than 3,202 mosdepth files | Re-run `sbatch --array=<missing_ids> 01_download_and_mosdepth.sh` for failed tasks. |
-| `Array task ... exceeds task count` | Use the Step 1 batching submission snippet above to recompute `TOTAL_TASKS` and resubmit with `%` throttling. |
+| Fewer than 3,202 mosdepth files | Re-run `bash 01_download_and_mosdepth.sh` — the sweep retries exactly the samples still missing output. |
 | Manifest is empty or has too few samples | Re-download the indexes: `rm $WORK_DIR/manifest.tsv && bash 00_setup.sh` |
-| First ~25–30 tasks run, then many download failures | This is often remote/network connection saturation. Keep `%` throttling on array submissions (for example `%10` to `%30`) and/or increase `SAMPLES_PER_TASK` to reduce concurrent Aspera/wget sessions. |
+| Widespread download failures or MD5 mismatches | See the triage in Step 1: transports and mismatches are attributed per sample in `logs/download_<sample>.log`, and a corrupt Aspera payload flips the run to HTTPS on its own. Lower `DOWNLOAD_SLOTS` or `ASPERA_BANDWIDTH` if timeouts dominate. |
 | Container image pull fails | Check internet access and try: `apptainer pull --force ngs-pca.sif docker://ghcr.io/jlanej/ngs-pca:latest` |
 
 ---

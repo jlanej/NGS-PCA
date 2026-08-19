@@ -87,13 +87,13 @@ if [[ -z "${ASPERA_BIN:-}" ]]; then
   fi
 fi
 ASPERA_SSH_KEY="${ASPERA_SSH_KEY:-${ASPERA_HOME}/etc/ebi_public.key}"
-# Per-task FASP target rate. The aggregate ceiling is this times the number of
-# concurrently running tasks, and it has to fit both the site link and what
-# EBI will serve one site: 200 tasks x 300m asked for 60 Gbit/s and collapsed
-# into packet loss and session timeouts, with sessions crawling at ~13 Mbit/s
-# before dying. 60 tasks x 50m ≈ 3 Gbit/s runs clean; raise one factor only
-# after a wave finishes without timeouts.
-ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-50m}"
+# Per-transfer FASP target rate. The aggregate asked of EBI is this times
+# DOWNLOAD_SLOTS (6 x 100m ≈ 600 Mbit/s), and it has to fit both the site
+# link and what EBI will serve one site: a retired design asked for 60 Gbit/s
+# across 200 tasks and collapsed into packet loss and session timeouts, with
+# sessions crawling at ~13 Mbit/s before dying. Raise one factor only after a
+# sweep finishes without timeouts.
+ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-100m}"
 # ascp attempts per file before falling back to HTTPS. Between attempts the
 # partial stays on disk and -k 2 resumes it, so a session that dies 7 GB into
 # a CRAM does not start over.
@@ -113,11 +113,11 @@ USE_ASPERA="${USE_ASPERA:-1}"
 # CRAM can be pulled as N concurrent range requests. Measured off-site, 8
 # streams ran ~3x a single stream. aria2c is preferred when present; otherwise
 # the pipeline falls back to parallel curl ranges, then to single-stream wget.
-# This multiplies across the array too - MAX_CONCURRENT_TASKS x this is what
-# ENA sees from the site at once, and 200 x 16 = 3,200 connections got the
-# fallbacks throttled along with FASP. For a single-file use (the reference
-# genome in setup), exporting 16 is reasonable.
-DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-4}"
+# What ENA sees from the site at once is DOWNLOAD_SLOTS x this - 6 x 16 = 96
+# connections, polite - and per-file speed is what sets the cohort's pace, so
+# this stays high now that few files transfer at a time. (The retired 200-task
+# array at 16 connections each presented 3,200 and got throttled.)
+DOWNLOAD_CONNECTIONS="${DOWNLOAD_CONNECTIONS:-16}"
 # Base used to rewrite ftp:// manifest URLs for the HTTP download paths.
 ENA_HTTPS_BASE="${ENA_HTTPS_BASE:-https://ftp.sra.ebi.ac.uk}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
@@ -126,15 +126,24 @@ EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
 ENA_FTP_BASE="ftp://ftp.sra.ebi.ac.uk"
 EBI_FTP_BASE="ftp://ftp.1000genomes.ebi.ac.uk"
 
-# ── Download array batching/concurrency controls ────────────────────────────
-# Number of manifest entries processed sequentially by each SLURM array task.
-SAMPLES_PER_TASK="${SAMPLES_PER_TASK:-1}"
-# Recommended max number of concurrently running array tasks when submitting:
-#   sbatch --array=1-N%${MAX_CONCURRENT_TASKS} 01_download_and_mosdepth.sh
-# Sized together with ASPERA_BANDWIDTH and DOWNLOAD_CONNECTIONS - see the
-# comments on both. Tasks also spend most of their life in mosdepth, not
-# downloading, so modest download concurrency costs less than it looks.
-MAX_CONCURRENT_TASKS="${MAX_CONCURRENT_TASKS:-60}"
+# ── Download manager controls ────────────────────────────────────────────────
+# 01_download_and_mosdepth.sh is one long-running job holding this many
+# concurrent transfers; each verified sample immediately becomes its own
+# mosdepth job (01b), whose concurrency the scheduler decides. The aggregate
+# asked of EBI is DOWNLOAD_SLOTS x per-file rate - few fast transfers beat
+# many starved ones.
+DOWNLOAD_SLOTS="${DOWNLOAD_SLOTS:-6}"
+# Pause downloading when this many CRAMs sit on disk awaiting mosdepth, so a
+# stalled queue cannot fill scratch (~16 GB each).
+MAX_LOCAL_CRAMS="${MAX_LOCAL_CRAMS:-60}"
+# Stop after this many dispatches; 0 means the whole manifest. For smoke tests.
+DOWNLOAD_LIMIT="${DOWNLOAD_LIMIT:-0}"
+# Manager state: per-sweep results, and the persistent Aspera distrust flag a
+# corrupt payload sets (delete the flag file to try Aspera again).
+DOWNLOAD_STATE_DIR="${DOWNLOAD_STATE_DIR:-${WORK_DIR}/download_state}"
+# Resources for each spawned mosdepth job.
+MOSDEPTH_MEM="${MOSDEPTH_MEM:-8G}"
+MOSDEPTH_TIME="${MOSDEPTH_TIME:-06:00:00}"
 
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
