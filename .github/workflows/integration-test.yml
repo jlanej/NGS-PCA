@@ -836,7 +836,8 @@ jobs:
         run: |
           set -euo pipefail
           for script in config.sh 01_download_and_mosdepth.sh 01b_mosdepth_sample.sh \
-                        globus_batch_from_manifest.sh 04_fast_mode_eval.sh test_download_manager.sh; do
+                        01c_dispatch_staged.sh globus_batch_from_manifest.sh \
+                        04_fast_mode_eval.sh test_download_manager.sh; do
             bash -n "${script}"
           done
           python3 -m py_compile 04_fast_mode_eval.py

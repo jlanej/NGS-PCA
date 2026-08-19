@@ -145,6 +145,16 @@ DOWNLOAD_STATE_DIR="${DOWNLOAD_STATE_DIR:-${WORK_DIR}/download_state}"
 MOSDEPTH_MEM="${MOSDEPTH_MEM:-8G}"
 MOSDEPTH_TIME="${MOSDEPTH_TIME:-06:00:00}"
 
+# ── Stage watcher (01c_dispatch_staged.sh) ──────────────────────────────────
+# Poll interval while watching a bulk transfer land in CRAM_DIR. A pair is
+# dispatched once both files' mtimes are unchanged across one interval.
+WATCH_INTERVAL="${WATCH_INTERVAL:-60}"
+# Exit after this many seconds with samples still missing and nothing in
+# flight - the transfer is finished or stalled either way (0 = wait forever).
+WATCH_IDLE_EXIT="${WATCH_IDLE_EXIT:-7200}"
+# Dispatches per sample before it is parked for the final sweep.
+WATCH_DISPATCH_ATTEMPTS="${WATCH_DISPATCH_ATTEMPTS:-3}"
+
 # ── mosdepth parameters ─────────────────────────────────────────────────────
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
 MOSDEPTH_THREADS="${MOSDEPTH_THREADS:-2}"
