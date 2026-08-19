@@ -455,6 +455,9 @@ for idx in "${!NEEDED_LINES[@]}"; do
     break
   fi
 
+  line_num="${NEEDED_LINES[${idx}]}"
+  sample="${NEEDED_SAMPLES[${idx}]}"
+
   # Keep at most DOWNLOAD_SLOTS transfers running. Polling rather than
   # wait -n: transfers run for minutes, and bash older than 4.3 has no wait -n.
   while (( $(jobs -rp | wc -l) >= DOWNLOAD_SLOTS )); do
@@ -463,14 +466,16 @@ for idx in "${!NEEDED_LINES[@]}"; do
 
   # Disk backpressure: a stalled mosdepth queue must not fill scratch. Only
   # completed jobs delete their CRAMs, so the count of *.cram files bounds
-  # local usage at roughly MAX_LOCAL_CRAMS x 16 GB.
-  while (( $(find "${CRAM_DIR}" -maxdepth 1 -name "*.cram" 2>/dev/null | wc -l) >= MAX_LOCAL_CRAMS )); do
-    echo "Backpressure: ${MAX_LOCAL_CRAMS} CRAMs on disk await mosdepth; pausing downloads for 60 s..."
-    sleep 60
-  done
-
-  line_num="${NEEDED_LINES[${idx}]}"
-  sample="${NEEDED_SAMPLES[${idx}]}"
+  # local usage at roughly MAX_LOCAL_CRAMS x 16 GB. It gates only samples that
+  # would DOWNLOAD: one whose CRAM is already on disk - staged by Globus, or
+  # left by a dead run - consumes no new space, and dispatching it frees some,
+  # so pausing those would deadlock a pre-staged cohort against itself.
+  if [[ ! -f "${CRAM_DIR}/${sample}.cram" ]]; then
+    while (( $(find "${CRAM_DIR}" -maxdepth 1 -name "*.cram" 2>/dev/null | wc -l) >= MAX_LOCAL_CRAMS )); do
+      echo "Backpressure: ${MAX_LOCAL_CRAMS} CRAMs on disk await mosdepth; pausing downloads for 60 s..."
+      sleep 60
+    done
+  fi
   line=$(sed -n "${line_num}p" "${MANIFEST}")
   IFS=$'\t' read -r _ CRAM_URL CRAI_URL CRAM_MD5 _ <<< "${line}"
 
