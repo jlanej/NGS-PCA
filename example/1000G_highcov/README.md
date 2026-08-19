@@ -622,7 +622,9 @@ file that does the renaming during the transfer and lists only samples still nee
 bash globus_batch_from_manifest.sh > globus_batch.txt
 
 # 2. Find your site's collection UUID, then submit the transfer
-#    (globus-cli: pip install globus-cli; then globus login)
+#    (globus-cli: try 'module spider globus' first, else pip install
+#    globus-cli - or run it from a laptop; transfers are endpoint-to-endpoint
+#    and the submitting machine never touches the data. Then: globus login)
 globus endpoint search "<your site>"
 globus transfer 47772002-3e5b-4fd3-b97c-18cee38d6df2 <YOUR_COLLECTION_UUID> \
   --batch globus_batch.txt --label "1kG highcov CRAMs" --notify failed,inactive
