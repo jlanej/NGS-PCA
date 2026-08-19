@@ -57,8 +57,18 @@ needs_processing() {
 
 EMITTED=0
 SKIPPED=0
+LINE_NUM=1
 while IFS=$'\t' read -r SAMPLE_ID CRAM_URL CRAI_URL _; do
+  LINE_NUM=$(( LINE_NUM + 1 ))   # manifest line, counting its header
   [[ -z "${SAMPLE_ID}" ]] && continue
+  # Whitespace inside a field - a stray space in a sample name, a carriage
+  # return from a damaged row - would split a batch line into extra tokens
+  # and break the pipeline's own file naming later. Surface it, don't ship it.
+  if [[ "${SAMPLE_ID}" =~ [[:space:]] || "${CRAM_URL}" =~ [[:space:]] || "${CRAI_URL}" =~ [[:space:]] ]]; then
+    echo "WARNING: skipping manifest line ${LINE_NUM}: whitespace inside a field (sample '${SAMPLE_ID}') - fix that manifest row" >&2
+    SKIPPED=$(( SKIPPED + 1 ))
+    continue
+  fi
   if ! needs_processing "${SAMPLE_ID}" || [[ -f "${CRAM_DIR}/${SAMPLE_ID}.cram" ]]; then
     SKIPPED=$(( SKIPPED + 1 ))
     continue
@@ -68,8 +78,9 @@ while IFS=$'\t' read -r SAMPLE_ID CRAM_URL CRAI_URL _; do
     SKIPPED=$(( SKIPPED + 1 ))
     continue
   fi
-  echo "${CRAM_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram"
-  echo "${CRAI_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
+  # Quoted because the batch parser splits lines shlex-style
+  printf '"%s" "%s"\n' "${CRAM_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram"
+  printf '"%s" "%s"\n' "${CRAI_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
   EMITTED=$(( EMITTED + 1 ))
 done < <(tail -n +2 "${MANIFEST}")
 
