@@ -100,7 +100,12 @@ ASPERA_BANDWIDTH="${ASPERA_BANDWIDTH:-50m}"
 ASPERA_RETRIES="${ASPERA_RETRIES:-3}"
 ASPERA_PORT=33001
 # Set USE_ASPERA=0 to skip Aspera entirely: no image is built, and downloads
-# go straight to the parallel-HTTPS paths below.
+# go straight to the parallel-HTTPS paths below. Also the right setting when
+# MD5 mismatches cluster on Aspera transfers (see the README's triage): one
+# cluster measured 506 of 506 Aspera payloads corrupt while HTTPS ran clean,
+# with ascp exiting success each time. 01 stops trusting Aspera within a task
+# after its first mismatch, but a wave known to corrupt should not pay one
+# wasted transfer per sample to rediscover it.
 USE_ASPERA="${USE_ASPERA:-1}"
 
 # ── Non-Aspera download tuning ──────────────────────────────────────────────

@@ -261,6 +261,19 @@ too high — see the rate note above — and EBI is throttling the site across a
 Failed samples need no bookkeeping either way: re-running `bash 01_download_and_mosdepth.sh`
 submits only the samples still missing output.
 
+When tasks fail *after* downloading, attribute the MD5 mismatches to a transport:
+
+```bash
+for f in $(grep -l "MD5 mismatch" $WORK_DIR/logs/mosdepth_<JOBID>_*.out); do
+  grep -m1 -o "CRAM: .* download complete" "$f"
+done | sort | uniq -c
+```
+
+A scattering across transports is transfer noise the in-task re-download absorbs. Mismatches on
+essentially **every** Aspera transfer while HTTPS runs clean is a different animal — systematic
+payload corruption with ascp exiting success (measured once at 506 of 506) — and the wave should
+run with `USE_ASPERA=0` while that is investigated on the host.
+
 ### Step 2: Run NGS-PCA
 
 ```bash

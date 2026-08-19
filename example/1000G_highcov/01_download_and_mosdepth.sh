@@ -210,6 +210,10 @@ download_aspera() {
   local aspera_path aspera_user
 
   [[ "${USE_ASPERA}" == "1" ]] || return 1
+  # Set when a completed Aspera transfer failed its MD5: corruption there is
+  # systematic, not per-file (measured at 506 of 506 on one cluster), so the
+  # rest of the task goes over HTTPS rather than re-verifying it per sample.
+  [[ "${ASPERA_DISABLED:-0}" == "1" ]] && return 1
   # ASPERA_BIN is resolved in config.sh: work-dir install if install_aspera.sh
   # has been run, else whatever ascp is on PATH.
   command -v "${ASPERA_BIN}" &>/dev/null || return 1
@@ -505,7 +509,8 @@ process_manifest_line() {
         echo "  WARNING: MD5 mismatch (expected: ${CRAM_MD5}, got: ${ACTUAL_MD5})"
         rm -f "${LOCAL_CRAM}" "${LOCAL_CRAI}"
         if (( download_attempt == 1 )); then
-          echo "  Removing corrupt file and re-downloading."
+          ASPERA_DISABLED=1
+          echo "  Removing corrupt file and re-downloading over HTTPS."
           continue
         fi
         echo "  ERROR: MD5 mismatch again after a fresh download. Re-submit this task to retry."
