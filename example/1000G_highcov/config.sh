@@ -149,8 +149,9 @@ MOSDEPTH_TIME="${MOSDEPTH_TIME:-06:00:00}"
 # Poll interval while watching a bulk transfer land in CRAM_DIR. A pair is
 # dispatched once both files' mtimes are unchanged across one interval.
 WATCH_INTERVAL="${WATCH_INTERVAL:-60}"
-# Exit after this many seconds with samples still missing and nothing in
-# flight - the transfer is finished or stalled either way (0 = wait forever).
+# Exit after this many seconds in which nothing in CRAM_DIR changed - no
+# arrivals, no growth - with samples still missing and nothing in flight:
+# the transfer is finished or stalled either way (0 = wait forever).
 WATCH_IDLE_EXIT="${WATCH_IDLE_EXIT:-7200}"
 # Dispatches per sample before it is parked for the final sweep.
 WATCH_DISPATCH_ATTEMPTS="${WATCH_DISPATCH_ATTEMPTS:-3}"

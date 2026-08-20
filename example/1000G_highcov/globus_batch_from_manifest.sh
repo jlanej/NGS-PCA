@@ -78,9 +78,11 @@ while IFS=$'\t' read -r SAMPLE_ID CRAM_URL CRAI_URL _; do
     SKIPPED=$(( SKIPPED + 1 ))
     continue
   fi
-  # Quoted because the batch parser splits lines shlex-style
-  printf '"%s" "%s"\n' "${CRAM_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram"
+  # Quoted because the batch parser splits lines shlex-style. The CRAI goes
+  # first: the index lands in seconds, so whenever its CRAM finishes the pair
+  # is complete and the stage watcher can dispatch it immediately.
   printf '"%s" "%s"\n' "${CRAI_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram.crai"
+  printf '"%s" "%s"\n' "${CRAM_URL#ftp://ftp.sra.ebi.ac.uk}" "${CRAM_DIR}/${SAMPLE_ID}.cram"
   EMITTED=$(( EMITTED + 1 ))
 done < <(tail -n +2 "${MANIFEST}")
 

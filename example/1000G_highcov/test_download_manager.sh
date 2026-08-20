@@ -173,6 +173,9 @@ batch="$(run_generator 2> "${T}/generator.log")"
 echo "${batch}" | grep -q "^\"/vol1/run/ERR5/S5.final.cram\" \"${T}/work/crams/S5.cram\"$" \
   || { echo "FAIL: generator batch line"; echo "${batch}"; exit 1; }
 check "generator emits only the needed sample" test "$(echo "${batch}" | wc -l | tr -d '[:space:]')" = "2"
+echo "${batch}" | head -1 | grep -q '\.crai"$' \
+  || { echo "FAIL: CRAI should be emitted before its CRAM"; exit 1; }
+echo "PASS: CRAI emitted first, so pairs complete when the CRAM lands"
 grep -q "Emitted 1 samples" "${T}/generator.log" || { echo "FAIL: generator summary"; exit 1; }
 echo "PASS: generator emits S5's two files, quoted and renamed, skips the done four"
 
@@ -279,6 +282,38 @@ check "W2's CRAM and CRAI cleaned after its verified run" \
   test ! -e "${T}/work3/crams/W2.cram" -a ! -e "${T}/work3/crams/W2.cram.crai"
 grep -q "parking W3" "${T}/watch.log" || { echo "FAIL: parking warning missing"; exit 1; }
 echo "PASS: watcher log explains the parking"
+
+echo "=== Stage watcher: a growing unpaired file holds the idle clock open ==="
+mkdir -p "${T}/work4/crams"
+printf 'SAMPLE\tCRAM\tCRAI\tMD5\n' > "${T}/work4/manifest.tsv"
+printf 'V1\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/V1.final.cram\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/V1.final.cram.crai\tabc\n' >> "${T}/work4/manifest.tsv"
+
+# a CRAM that grows for ~6 s and never gets its CRAI - the CRAM-first phase
+(
+  for i in 1 2 3 4 5 6; do
+    python3 -c "open('${T}/work4/crams/V1.cram','ab').write(b'chunk')"
+    sleep 1
+  done
+) &
+GROWER_PID=$!
+
+T0=$(date +%s)
+idle_rc=0
+WORK_DIR="${T}/work4" \
+MANIFEST="${T}/work4/manifest.tsv" \
+COMPARE_FAST_MODE=1 \
+WATCHER_LOCAL=1 \
+WATCH_INTERVAL=1 \
+WATCH_IDLE_EXIT=2 \
+bash "${HERE}/01c_dispatch_staged.sh" > "${T}/idle.log" 2>&1 || idle_rc=$?
+ELAPSED=$(( $(date +%s) - T0 ))
+wait "${GROWER_PID}" 2>/dev/null || true
+
+check "idle exit is clean when nothing is parked" test "${idle_rc}" -eq 0
+check "growth held the 2 s idle clock open past the 6 s of writes" test "${ELAPSED}" -ge 7
+grep -q "still missing - the transfer is finished or stalled" "${T}/idle.log" \
+  || { echo "FAIL: idle-exit message missing"; cat "${T}/idle.log"; exit 1; }
+echo "PASS: idle exit fired only after the directory went quiet"
 
 echo ""
 echo "=== All download-manager tests passed ==="
