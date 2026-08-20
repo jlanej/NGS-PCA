@@ -22,7 +22,10 @@
 # sweep for anything the transfer missed.
 #
 # Exits when every sample is done, in flight, or parked - or after
-# WATCH_IDLE_EXIT seconds with no arrivals (0 = wait forever).
+# WATCH_IDLE_EXIT seconds in which nothing in CRAM_DIR changed at all
+# (0 = wait forever). Growing files count as activity: a transfer that
+# delivers all the CRAMs before their CRAIs completes no pairs for hours,
+# and must not read as a stall.
 #
 # Usage:
 #   bash 01c_dispatch_staged.sh              # submits itself as one job
@@ -126,8 +129,18 @@ done < <(tail -n +2 "${MANIFEST}")
 echo "Stage watcher: ${#SAMPLES[@]} samples in the manifest; polling ${CRAM_DIR} every ${WATCH_INTERVAL} s."
 LAST_ACTIVITY=$(date +%s)
 IN_FLIGHT_FILE="${WATCH_STATE}/in_flight.$$"
+# Liveness is any change in CRAM_DIR, not just completed pairs: a transfer
+# can spend hours delivering CRAMs before their CRAIs, and growing files must
+# hold the idle clock open even though nothing is dispatchable yet.
+ACTIVITY_STAMP="${WATCH_STATE}/activity.stamp"
+touch "${ACTIVITY_STAMP}"
 
 while :; do
+  if [[ -n "$(find "${CRAM_DIR}" -maxdepth 1 -newer "${ACTIVITY_STAMP}" -print 2>/dev/null | head -1)" ]]; then
+    touch "${ACTIVITY_STAMP}"
+    LAST_ACTIVITY=$(date +%s)
+  fi
+
   : > "${IN_FLIGHT_FILE}"
   if command -v squeue &>/dev/null; then
     squeue -h -u "${USER:-$(id -un)}" -o "%j" 2>/dev/null \
@@ -212,8 +225,8 @@ while :; do
   fi
   if (( WATCH_IDLE_EXIT > 0 && WAITING > 0 && IN_FLIGHT == 0 )) \
      && (( $(date +%s) - LAST_ACTIVITY > WATCH_IDLE_EXIT )); then
-    echo "No arrivals for ${WATCH_IDLE_EXIT} s with ${WAITING} sample(s) still missing - the"
-    echo "transfer looks finished or stalled. Run bash 01_download_and_mosdepth.sh to sweep."
+    echo "Nothing in ${CRAM_DIR} has changed for ${WATCH_IDLE_EXIT} s with ${WAITING} sample(s)"
+    echo "still missing - the transfer is finished or stalled. Run bash 01_download_and_mosdepth.sh to sweep."
     break
   fi
   sleep "${WATCH_INTERVAL}"
