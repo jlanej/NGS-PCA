@@ -614,20 +614,29 @@ endpoint-to-endpoint on data-transfer infrastructure rather than through a compu
 
 The pipeline is built to receive this. Staged files named `<SAMPLE>.cram` in `$CRAM_DIR` are
 treated as "already present": the manager skips the download, **still verifies the manifest
-MD5**, and goes straight to spawning mosdepth. `globus_batch_from_manifest.sh` emits a batch
-file that does the renaming during the transfer and lists only samples still needing work:
+MD5**, and goes straight to spawning mosdepth. `globus_batch_from_manifest.sh` writes **two**
+batch files that do the renaming during the transfer — indexes and CRAMs apart, because Globus
+chooses its own file order *within* a task (a mixed task was observed running the CRAMs first,
+completing no pair for hours). Submitted as two tasks, the CRAI task lands in minutes, and from
+then on every CRAM that finishes completes its pair:
 
 ```bash
-# 1. Generate the batch file (source path, destination path per line)
-bash globus_batch_from_manifest.sh > globus_batch.txt
+# 1. Generate the batch files (every sample still needing mosdepth output;
+#    files already on disk are handled by --sync-level checksum below)
+bash globus_batch_from_manifest.sh
 
-# 2. Find your site's collection UUID, then submit the transfer
+# 2. Find your site's collection UUID, then submit BOTH - CRAIs first, and
+#    always with --sync-level checksum: complete files are skipped nearly
+#    free, partial or corrupt ones re-transferred, which makes regenerate +
+#    resubmit the whole restart story after a cancel or failure.
 #    (globus-cli: try 'module spider globus' first, else pip install
 #    globus-cli - or run it from a laptop; transfers are endpoint-to-endpoint
 #    and the submitting machine never touches the data. Then: globus login)
 globus endpoint search "<your site>"
 globus transfer 47772002-3e5b-4fd3-b97c-18cee38d6df2 <YOUR_COLLECTION_UUID> \
-  --batch globus_batch.txt --label "1kG highcov CRAMs" --notify failed,inactive
+  --batch globus_batch_crai.txt --sync-level checksum --label "1kG crai" --notify failed,inactive
+globus transfer 47772002-3e5b-4fd3-b97c-18cee38d6df2 <YOUR_COLLECTION_UUID> \
+  --batch globus_batch_cram.txt --sync-level checksum --label "1kG cram" --notify failed,inactive
 
 # 3. While the transfer runs, dispatch mosdepth as pairs land. The watcher
 #    polls for CRAM+CRAI pairs whose mtimes have settled, submits each one's
