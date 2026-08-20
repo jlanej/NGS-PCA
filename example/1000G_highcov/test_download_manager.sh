@@ -136,11 +136,11 @@ run_manager() {
   bash "${HERE}/01_download_and_mosdepth.sh"
 }
 
-run_generator() {
+run_generator() { # <output_prefix>
   WORK_DIR="${T}/work" \
   MANIFEST="${T}/work/manifest.tsv" \
   COMPARE_FAST_MODE=1 \
-  bash "${HERE}/globus_batch_from_manifest.sh"
+  bash "${HERE}/globus_batch_from_manifest.sh" "$1"
 }
 
 check() { # label condition-description: pass a test command as the rest
@@ -169,15 +169,15 @@ check "S5 was re-downloaded before failing" \
 check "distrust flag set by the mismatch" test -f "${T}/work/download_state/aspera_disabled"
 
 echo "=== Sweep 2: S5 pre-staged (the Globus workflow), remote gone ==="
-batch="$(run_generator 2> "${T}/generator.log")"
-echo "${batch}" | grep -q "^\"/vol1/run/ERR5/S5.final.cram\" \"${T}/work/crams/S5.cram\"$" \
-  || { echo "FAIL: generator batch line"; echo "${batch}"; exit 1; }
-check "generator emits only the needed sample" test "$(echo "${batch}" | wc -l | tr -d '[:space:]')" = "2"
-echo "${batch}" | head -1 | grep -q '\.crai"$' \
-  || { echo "FAIL: CRAI should be emitted before its CRAM"; exit 1; }
-echo "PASS: CRAI emitted first, so pairs complete when the CRAM lands"
+run_generator "${T}/gbatch" 2> "${T}/generator.log"
+grep -q "^\"/vol1/run/ERR5/S5.final.cram\" \"${T}/work/crams/S5.cram\"$" "${T}/gbatch_cram.txt" \
+  || { echo "FAIL: CRAM batch line"; cat "${T}/gbatch_cram.txt"; exit 1; }
+grep -q "^\"/vol1/run/ERR5/S5.final.cram.crai\" \"${T}/work/crams/S5.cram.crai\"$" "${T}/gbatch_crai.txt" \
+  || { echo "FAIL: CRAI batch line"; cat "${T}/gbatch_crai.txt"; exit 1; }
+check "CRAI batch holds only the needed sample" test "$(wc -l < "${T}/gbatch_crai.txt" | tr -d '[:space:]')" = "1"
+check "CRAM batch holds only the needed sample" test "$(wc -l < "${T}/gbatch_cram.txt" | tr -d '[:space:]')" = "1"
 grep -q "Emitted 1 samples" "${T}/generator.log" || { echo "FAIL: generator summary"; exit 1; }
-echo "PASS: generator emits S5's two files, quoted and renamed, skips the done four"
+echo "PASS: generator splits S5 into CRAI and CRAM batches, quoted and renamed, skips the done four"
 
 # stage what Globus would deliver, with the correct content, and remove the
 # remote copies entirely: a download attempt for S5 would now fail loudly
@@ -216,10 +216,12 @@ mkdir -p "${T}/work2/crams"
 printf 'SAMPLE\tCRAM\tCRAI\tMD5\n' > "${T}/work2/manifest.tsv"
 printf 'G1\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/G1.final.cram\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/G1.final.cram.crai\tabc\n' >> "${T}/work2/manifest.tsv"
 printf 'B AD\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/BAD.final.cram\tftp://ftp.sra.ebi.ac.uk/vol1/run/E/BAD.final.cram.crai\tdef\n' >> "${T}/work2/manifest.tsv"
-batch2="$(WORK_DIR="${T}/work2" MANIFEST="${T}/work2/manifest.tsv" COMPARE_FAST_MODE=0 \
-  bash "${HERE}/globus_batch_from_manifest.sh" 2> "${T}/generator2.log")"
-check "good row emitted" test "$(echo "${batch2}" | grep -c "G1.cram")" = "2"
-echo "${batch2}" | grep -q "BAD" && { echo "FAIL: whitespace row must not be emitted"; exit 1; }
+WORK_DIR="${T}/work2" MANIFEST="${T}/work2/manifest.tsv" COMPARE_FAST_MODE=0 \
+  bash "${HERE}/globus_batch_from_manifest.sh" "${T}/gbatch2" 2> "${T}/generator2.log"
+check "good row in the CRAI batch" test "$(grep -c "G1.cram.crai" "${T}/gbatch2_crai.txt")" = "1"
+check "good row in the CRAM batch" test "$(grep -c "G1.cram\"" "${T}/gbatch2_cram.txt")" = "1"
+grep -q "BAD" "${T}/gbatch2_crai.txt" "${T}/gbatch2_cram.txt" \
+  && { echo "FAIL: whitespace row must not be emitted"; exit 1; }
 grep -q "skipping manifest line 3: whitespace inside a field (sample 'B AD')" "${T}/generator2.log" \
   || { echo "FAIL: whitespace warning should name the manifest line"; cat "${T}/generator2.log"; exit 1; }
 echo "PASS: whitespace row skipped with a warning naming manifest line 3"
