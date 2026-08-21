@@ -160,16 +160,21 @@ WATCH_DISPATCH_ATTEMPTS="${WATCH_DISPATCH_ATTEMPTS:-3}"
 MOSDEPTH_BIN_SIZE="${MOSDEPTH_BIN_SIZE:-1000}"
 MOSDEPTH_THREADS="${MOSDEPTH_THREADS:-2}"
 
-# ── mosdepth fast-mode comparison (optional) ────────────────────────────────
-# COMPARE_FAST_MODE=1 makes 01_download_and_mosdepth.sh run mosdepth twice per
-# sample - once as configured, once with --fast-mode - into two output trees,
-# recording the wall time of each run. Download time is in neither measurement:
-# both runs share the one CRAM the task just downloaded, and their order
-# alternates by manifest line so page-cache warming cannot favour one mode in
-# aggregate. A sample is processed when either tree lacks its output, so every
-# timed pair comes from one node and one download. See the README's
-# "Fast-mode comparison" section; 04_fast_mode_eval.sh evaluates the results.
-COMPARE_FAST_MODE="${COMPARE_FAST_MODE:-0}"
+# ── mosdepth fast-mode comparison ───────────────────────────────────────────
+# COMPARE_FAST_MODE=1 makes every mosdepth dispatch run twice per sample -
+# once as configured, once with --fast-mode - into two output trees, recording
+# the wall time of each run. Download time is in neither measurement: both
+# runs share one staged CRAM, and their order alternates by manifest line so
+# page-cache warming cannot favour one mode in aggregate. A sample is
+# processed when either tree lacks its output, so every timed pair comes from
+# one node and one download. See the README's "Fast-mode comparison" section;
+# 04_fast_mode_eval.sh evaluates the results.
+#
+# ON BY DEFAULT while the fast-mode comparison campaign runs: the flag decides
+# whether each sample yields one mosdepth run or a timed pair, a mistake that
+# is only discovered after the CRAMs are deleted. Set COMPARE_FAST_MODE=0 (or
+# flip this default back) for a single-tree run once the comparison concludes.
+COMPARE_FAST_MODE="${COMPARE_FAST_MODE:-1}"
 MOSDEPTH_FAST_DIR="${MOSDEPTH_FAST_DIR:-${WORK_DIR}/mosdepth_output_fast}"
 NGSPCA_FAST_OUTPUT="${NGSPCA_FAST_OUTPUT:-${WORK_DIR}/ngspca_output_fast}"
 QC_FAST_OUTPUT="${QC_FAST_OUTPUT:-${WORK_DIR}/qc_output_fast}"
