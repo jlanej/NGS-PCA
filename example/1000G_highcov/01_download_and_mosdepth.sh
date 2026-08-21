@@ -437,6 +437,15 @@ done < <(tail -n +2 "${MANIFEST}")
 rm -f "${IN_FLIGHT_FILE}"
 
 echo "Download manager: ${TOTAL_SAMPLES} samples in the manifest."
+# Which mosdepth work each dispatched job will do is decided here by
+# environment, and getting it wrong is only discovered after the CRAMs are
+# gone - so it is announced, loudly, every run.
+if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
+  echo "  Fast-mode comparison: ON - each sample runs mosdepth twice (normal + fast, timed)."
+else
+  echo "  Fast-mode comparison: off - single mosdepth run per sample. If this cohort is for"
+  echo "  the comparison, stop and set COMPARE_FAST_MODE=1 (export it, or pin it in config.sh)."
+fi
 echo "  Already done:        ${SKIPPED_DONE}"
 echo "  mosdepth in flight:  ${SKIPPED_IN_FLIGHT}"
 echo "  To download:         ${#NEEDED_LINES[@]} (${DOWNLOAD_SLOTS} at a time)"

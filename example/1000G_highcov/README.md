@@ -325,6 +325,8 @@ expensive stage.
 #    mosdepth twice (standard -> mosdepth_output/, fast -> mosdepth_output_fast/),
 #    recording each run's wall time. Downloads are shared and untimed; the two
 #    runs alternate order so cache warming cancels out in aggregate.
+#    (Currently the config default - the export is belt and braces; the
+#    manager and watcher announce the mode in their first log lines.)
 export COMPARE_FAST_MODE=1
 bash 01_download_and_mosdepth.sh
 

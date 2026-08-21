@@ -273,6 +273,9 @@ bash "${HERE}/01c_dispatch_staged.sh" > "${T}/watch.log" 2>&1 || watch_rc=$?
 wait "${STAGER_PID}" 2>/dev/null || true
 
 check "watcher exits non-zero when a sample is parked" test "${watch_rc}" -ne 0
+grep -q "Fast-mode comparison: ON" "${T}/watch.log" \
+  || { echo "FAIL: watcher must announce the comparison mode"; exit 1; }
+echo "PASS: watcher announces the comparison is ON"
 check "W1 dispatched and completed" test -s "${T}/work3/mosdepth_output/W1.by1000.regions.bed.gz"
 check "W2 completed after arriving mid-run" test -s "${T}/work3/mosdepth_output/W2.by1000.regions.bed.gz"
 check "W2 fast tree too" test -s "${T}/work3/mosdepth_output_fast/W2.by1000.regions.bed.gz"

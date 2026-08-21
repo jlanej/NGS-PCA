@@ -127,6 +127,12 @@ while IFS=$'\t' read -r SAMPLE_ID _ _ CRAM_MD5 _; do
 done < <(tail -n +2 "${MANIFEST}")
 
 echo "Stage watcher: ${#SAMPLES[@]} samples in the manifest; polling ${CRAM_DIR} every ${WATCH_INTERVAL} s."
+if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
+  echo "  Fast-mode comparison: ON - each dispatched job runs mosdepth twice (normal + fast, timed)."
+else
+  echo "  Fast-mode comparison: off - single mosdepth run per sample. If this cohort is for"
+  echo "  the comparison, stop and set COMPARE_FAST_MODE=1 (export it, or pin it in config.sh)."
+fi
 LAST_ACTIVITY=$(date +%s)
 IN_FLIGHT_FILE="${WATCH_STATE}/in_flight.$$"
 # Liveness is any change in CRAM_DIR, not just completed pairs: a transfer
