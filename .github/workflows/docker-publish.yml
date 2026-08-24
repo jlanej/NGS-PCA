@@ -45,3 +45,41 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # The aria2 helper for the 1000G download manager, published as the :aria2
+  # tag of the same (public) package so cluster provisioning is an
+  # unprivileged `apptainer pull` - no fakeroot, any node.
+  build-and-push-aria2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=aria2
+
+      - name: Build and push the aria2 helper image
+        uses: docker/build-push-action@v6
+        with:
+          context: example/1000G_highcov
+          file: example/1000G_highcov/aria2.Dockerfile
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

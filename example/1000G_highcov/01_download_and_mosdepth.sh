@@ -82,12 +82,23 @@ provision_aria2() {
   command -v aria2c &>/dev/null && return 0
   [[ -s "${ARIA2_SIF}" ]] && return 0
   command -v apptainer &>/dev/null || return 0
-  [[ -f "${CONFIG_DIR}/aria2.def" ]] || return 0
   echo "Provisioning aria2 image (one-time)..."
-  if ! apptainer build --fakeroot "${ARIA2_SIF}" "${CONFIG_DIR}/aria2.def"; then
-    rm -f "${ARIA2_SIF}"
-    echo "  aria2 image build failed (no fakeroot here?); parallel curl remains the fallback."
+  # Pull first: converting the published OCI image is unprivileged and works
+  # on any node - compute nodes included, where fakeroot builds have failed
+  # with "User not listed in /etc/subuid" and a missing faked.
+  if apptainer pull "${ARIA2_SIF}" "${ARIA2_IMAGE_URI}" &>/dev/null && [[ -s "${ARIA2_SIF}" ]]; then
+    echo "  Pulled ${ARIA2_IMAGE_URI}."
+    return 0
   fi
+  rm -f "${ARIA2_SIF}"
+  # Offline, or a fork whose registry lacks the tag: try building locally.
+  if [[ -f "${CONFIG_DIR}/aria2.def" ]] \
+     && apptainer build --fakeroot "${ARIA2_SIF}" "${CONFIG_DIR}/aria2.def" \
+     && [[ -s "${ARIA2_SIF}" ]]; then
+    return 0
+  fi
+  rm -f "${ARIA2_SIF}"
+  echo "  Could not pull ${ARIA2_IMAGE_URI} or build aria2.def here; parallel curl remains the fallback."
 }
 
 # Whether a sample still needs downloading or mosdepth. With the fast-mode
