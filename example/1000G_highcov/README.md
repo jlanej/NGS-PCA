@@ -567,9 +567,25 @@ bash 00_setup.sh
 
 ## Download methods
 
-The pipeline downloads CRAMs from the ENA FTP and reference data from the EBI 1000G FTP. Three download methods are available (in order of speed):
+The pipeline downloads CRAMs from the ENA FTP and reference data from the EBI 1000G FTP, with
+one important exception that usually decides the cohort's pace:
 
-### 1. Aspera (optional, fastest)
+### 0. AWS Open Data mirror (default HTTPS source)
+
+The NYGC 30x CRAMs are mirrored in the [AWS Open Data Program](https://registry.opendata.aws/1000-genomes/)
+at `s3://1000genomes/1000G_2504_high_coverage/` — verified **byte-identical** to ENA's copies
+(content lengths match exactly, and every file passes the manifest MD5), served anonymously over
+HTTPS with range support and free egress. Nothing at EBI — shared DTNs, FASP congestion,
+throttling — is in the path, and S3 read throughput is effectively unbounded from a
+well-connected site.
+
+The manager's HTTPS transports (aria2c, parallel curl) try this mirror **before** ENA
+automatically; the transport census in the download logs shows which source served each file
+(`aria2c download complete (S3, ...)`). Set `S3_HTTPS_BASE=""` to disable it. When the mirror is
+healthy, it typically outruns both Aspera and Globus — pair it with aria2c on the manager's node
+and a modest `DOWNLOAD_SLOTS` becomes multi-Gbit/s.
+
+### 1. Aspera (optional)
 
 [IBM Aspera Connect](https://www.ibm.com/products/aspera/downloads) uses the FASP protocol for high-speed transfers typically 10–100× faster than FTP/HTTP. Install it on your HPC system or load it as a module:
 
