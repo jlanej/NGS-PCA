@@ -4,9 +4,10 @@ From: alpine:3.20
 # aria2c for the 1000G download manager, as its own small image on purpose:
 # the analysis image (ngspca + mosdepth) is a scientific artifact whose
 # contents decide results, while the downloader changes on operational
-# grounds. Built by 01_download_and_mosdepth.sh on the submit host when no
-# host aria2c exists - the same pattern, and the same fakeroot requirement,
-# as aspera.def. Sites without --fakeroot keep the parallel-curl fallback.
+# grounds. This def is the FALLBACK: provisioning first pulls the
+# CI-published image (ARIA2_IMAGE_URI, built from aria2.Dockerfile), which
+# needs no privileges on any node. Building this file locally - for forks or
+# offline sites - needs `apptainer build --fakeroot`, like aspera.def.
 
 %post
     apk add --no-cache aria2 ca-certificates

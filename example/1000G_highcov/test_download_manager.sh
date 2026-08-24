@@ -84,8 +84,19 @@ EOF
 
 cat > "${T}/bin/apptainer" <<'EOF'
 #!/usr/bin/env bash
-# fakes "apptainer exec ... mosdepth ...": --version prints one, a real run
-# writes <prefix>.regions.bed.gz under the directory bound to /mosdepth
+# fakes pull (writes the destination sif; FAKE_PULL_FAIL=1 to fail), build
+# (writes its destination; FAKE_BUILD_FAIL=1 to fail), exec --version, and
+# "exec ... mosdepth ..." writing <prefix>.regions.bed.gz under the /mosdepth bind
+if [[ "$1" == "pull" ]]; then
+  [[ -n "${FAKE_PULL_FAIL:-}" ]] && exit 1
+  echo "sif" > "$2"
+  exit 0
+fi
+if [[ "$1" == "build" ]]; then
+  [[ -n "${FAKE_BUILD_FAIL:-}" ]] && exit 1
+  echo "sif" > "$3"   # build --fakeroot DEST DEF
+  exit 0
+fi
 if [[ "$*" == *"--version"* ]]; then
   echo "mosdepth 9.9.9-test"
   exit 0
@@ -317,6 +328,33 @@ echo "sif" > "${T}/fake_aria2.sif"   # non-empty: the resolver refuses a half-bu
   (( ${#ARIA2C[@]} == 0 )) || { echo "FAIL: array should stay empty"; exit 1; }
 ) || exit 1
 echo "PASS: aria2c resolves to the host, then the bespoke image, then cleanly to nothing"
+
+echo "=== aria2 provisioning: pull, then local build, then clean fallback ==="
+sed -n '/^provision_aria2()/,/^}/p' "${HERE}/01_download_and_mosdepth.sh" > "${T}/pvfn.sh"
+(
+  set -u
+  PATH="${T}/bin_noaria"
+  CONFIG_DIR="${HERE}"
+  ARIA2_IMAGE_URI="docker://example.invalid/aria2:test"
+  source "${T}/pvfn.sh"
+
+  ARIA2_SIF="${T}/prov1.sif"
+  provision_aria2 > /dev/null
+  [[ -s "${T}/prov1.sif" ]] || { echo "FAIL: pull should have provisioned"; exit 1; }
+
+  export FAKE_PULL_FAIL=1
+  ARIA2_SIF="${T}/prov2.sif"
+  provision_aria2 > /dev/null
+  [[ -s "${T}/prov2.sif" ]] || { echo "FAIL: local build should have provisioned when the pull fails"; exit 1; }
+
+  export FAKE_BUILD_FAIL=1
+  ARIA2_SIF="${T}/prov3.sif"
+  out="$(provision_aria2)"
+  [[ ! -e "${T}/prov3.sif" ]] || { echo "FAIL: nothing should remain when both fail"; exit 1; }
+  [[ "${out}" == *"parallel curl remains the fallback"* ]] \
+    || { echo "FAIL: fallback message missing"; exit 1; }
+) || exit 1
+echo "PASS: provisioning pulls, falls back to a local build, then degrades cleanly"
 
 echo "=== Stage watcher: dispatch on arrival, re-dispatch after premature MD5, park the hopeless ==="
 mkdir -p "${T}/work3/crams"

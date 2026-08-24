@@ -585,12 +585,14 @@ automatically; the transport census in the download logs shows which source serv
 healthy, it typically outruns both Aspera and Globus — pair it with aria2c and a modest
 `DOWNLOAD_SLOTS` becomes multi-Gbit/s.
 
-No host aria2c is needed for that: at submission the manager builds a small bespoke `aria2.sif`
-from [`aria2.def`](aria2.def) and runs it via apptainer — deliberately **not** part of the
-analysis image, whose contents decide scientific results while a downloader changes on
-operational grounds. The manager's startup lines say which aria2c was found (host, image, or
-none, in which case parallel curl carries the load). Like `aspera.def`, building needs
-`apptainer build --fakeroot`; sites without it keep the curl fallback.
+No host aria2c is needed for that: the manager provisions a small helper image by **pulling**
+the CI-published `ghcr.io/jlanej/ngs-pca:aria2` (built from [`aria2.Dockerfile`](aria2.Dockerfile)) —
+an unprivileged OCI-to-SIF conversion that works on any node, compute nodes included, where
+`--fakeroot` builds fail. It is deliberately **not** part of the analysis image, whose contents
+decide scientific results while a downloader changes on operational grounds. Offline sites and
+forks without the published tag fall back to building [`aria2.def`](aria2.def) locally (that
+path does need fakeroot, like `aspera.def`), and failing everything, parallel curl carries the
+load. The manager's startup lines say which aria2c was found.
 
 ### 1. Aspera (optional)
 

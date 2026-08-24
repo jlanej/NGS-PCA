@@ -125,10 +125,13 @@ ENA_HTTPS_BASE="${ENA_HTTPS_BASE:-https://ftp.sra.ebi.ac.uk}"
 # transports; every file still passes the manifest MD5 gate either way. Set
 # empty to disable and pull from ENA only.
 S3_HTTPS_BASE="${S3_HTTPS_BASE:-https://1000genomes.s3.amazonaws.com}"
-# Bespoke aria2c image (aria2.def), built at submission when the host has no
-# aria2c - deliberately separate from the analysis image, whose contents
-# decide scientific results while a downloader changes on operational grounds.
+# Bespoke aria2c image - deliberately separate from the analysis image, whose
+# contents decide scientific results while a downloader changes on
+# operational grounds. Provisioned by pulling the CI-published tag below (an
+# unprivileged conversion that works on any node); building aria2.def locally
+# is the fallback for forks and offline sites, and needs fakeroot.
 ARIA2_SIF="${ARIA2_SIF:-${WORK_DIR}/aria2.sif}"
+ARIA2_IMAGE_URI="${ARIA2_IMAGE_URI:-docker://ghcr.io/jlanej/ngs-pca:aria2}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
 ENA_ASPERA_USER="era-fasp@fasp.sra.ebi.ac.uk"
 EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
