@@ -292,6 +292,10 @@ for stub in "${T}/bin/"*; do
   [[ "$(basename "${stub}")" == "aria2c" ]] && continue
   ln -sf "${stub}" "${T}/bin_noaria/$(basename "${stub}")"
 done
+# bash for the stubs' env shebangs; nothing else, because the runner's system
+# dirs may hold a real aria2c (GitHub's Ubuntu image ships one), and this
+# case exists to test its absence
+ln -sf "$(command -v bash)" "${T}/bin_noaria/bash"
 echo "sif" > "${T}/fake_aria2.sif"   # non-empty: the resolver refuses a half-built image
 (
   set -u
@@ -301,7 +305,7 @@ echo "sif" > "${T}/fake_aria2.sif"   # non-empty: the resolver refuses a half-bu
   [[ "${ARIA2C[0]}" == "aria2c" && "${ARIA2C_HOW}" == "host" ]] \
     || { echo "FAIL: host resolution: ${ARIA2C[*]} / ${ARIA2C_HOW}"; exit 1; }
 
-  PATH="${T}/bin_noaria:/usr/bin:/bin"
+  PATH="${T}/bin_noaria"
   ARIA2C=(); ARIA2C_HOW=""
   resolve_aria2c || { echo "FAIL: image aria2c should resolve"; exit 1; }
   [[ "${ARIA2C[0]}" == "apptainer" && "${ARIA2C_HOW}" == *"fake_aria2.sif"* ]] \
