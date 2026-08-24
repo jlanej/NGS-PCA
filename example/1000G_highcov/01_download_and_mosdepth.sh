@@ -71,6 +71,25 @@ mosdepth_fast_output_path() {
   echo "${MOSDEPTH_FAST_DIR}/${1}.by${MOSDEPTH_BIN_SIZE}.regions.bed.gz"
 }
 
+# Build the bespoke aria2 image when the host lacks aria2c. Called from both
+# the submission pre-flight and the manager itself: an inline run (salloc,
+# DOWNLOADER_LOCAL=1) never passes through submission mode, and skipping
+# provisioning there silently downgraded every transfer to parallel curl.
+# Addressed through CONFIG_DIR because a SLURM batch script runs from the
+# spool directory. Non-fatal everywhere - a node without fakeroot just keeps
+# the curl fallback.
+provision_aria2() {
+  command -v aria2c &>/dev/null && return 0
+  [[ -s "${ARIA2_SIF}" ]] && return 0
+  command -v apptainer &>/dev/null || return 0
+  [[ -f "${CONFIG_DIR}/aria2.def" ]] || return 0
+  echo "Provisioning aria2 image (one-time)..."
+  if ! apptainer build --fakeroot "${ARIA2_SIF}" "${CONFIG_DIR}/aria2.def"; then
+    rm -f "${ARIA2_SIF}"
+    echo "  aria2 image build failed (no fakeroot here?); parallel curl remains the fallback."
+  fi
+}
+
 # Whether a sample still needs downloading or mosdepth. With the fast-mode
 # comparison on, a sample missing either output is redone in full so that
 # every timed pair comes from one node and one downloaded CRAM.
@@ -109,16 +128,7 @@ if [[ -z "${SLURM_JOB_ID:-}" && "${DOWNLOADER_LOCAL:-0}" != "1" ]]; then
       echo "  Continuing without Aspera; downloads will use parallel HTTPS."
     fi
   fi
-  # aria2c the same way when the host lacks it: a small bespoke image, built
-  # once on the submit host. Non-fatal - parallel curl remains the fallback.
-  if ! command -v aria2c &>/dev/null && command -v apptainer &>/dev/null \
-     && [[ ! -s "${ARIA2_SIF}" ]]; then
-    echo "Provisioning aria2 image (one-time)..."
-    if ! apptainer build --fakeroot "${ARIA2_SIF}" "${SCRIPT_DIR}/aria2.def"; then
-      rm -f "${ARIA2_SIF}"
-      echo "  Continuing without aria2c; HTTPS downloads will use parallel curl."
-    fi
-  fi
+  provision_aria2
   echo "Submitting the download manager (${DOWNLOAD_SLOTS} concurrent downloads)..."
   echo "  Manager log: ${LOG_DIR}/download_manager_<jobid>.out"
   echo "  Per-sample download logs: ${LOG_DIR}/download_<sample>.log"
@@ -514,6 +524,7 @@ else
   echo "  Fast-mode comparison: off - single mosdepth run per sample. If this cohort is for"
   echo "  the comparison, stop and set COMPARE_FAST_MODE=1 (export it, or pin it in config.sh)."
 fi
+provision_aria2
 resolve_aria2c || true
 if (( ${#ARIA2C[@]} )); then
   echo "  aria2c: ${ARIA2C_HOW}"
