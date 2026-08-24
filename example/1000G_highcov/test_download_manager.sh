@@ -48,7 +48,21 @@ exit 1
 EOF
 cat > "${T}/bin/aria2c" <<'EOF'
 #!/usr/bin/env bash
-exit 1
+# fails unless FAKE_S3 is set and holds the requested basename; the URL is the
+# last argument and --dir/--out name the destination, like the real thing
+[[ -n "${FAKE_S3:-}" ]] || exit 1
+dir=""; out=""; url=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) dir="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+src="${FAKE_S3}/$(basename "${url}")"
+[[ -f "${src}" ]] || exit 1
+cp "${src}" "${dir}/${out}"
 EOF
 
 cat > "${T}/bin/squeue" <<'EOF'
@@ -225,6 +239,84 @@ grep -q "BAD" "${T}/gbatch2_crai.txt" "${T}/gbatch2_cram.txt" \
 grep -q "skipping manifest line 3: whitespace inside a field (sample 'B AD')" "${T}/generator2.log" \
   || { echo "FAIL: whitespace warning should name the manifest line"; cat "${T}/generator2.log"; exit 1; }
 echo "PASS: whitespace row skipped with a warning naming manifest line 3"
+
+echo "=== S3 mirror: URL mapping and source preference ==="
+sed -n '/^s3_url_for() {/,/^}/p' "${HERE}/01_download_and_mosdepth.sh" > "${T}/s3fn.sh"
+(
+  source "${T}/s3fn.sh"
+  S3_HTTPS_BASE="https://1000genomes.s3.amazonaws.com"
+  u="ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3239480/NA12718.final.cram"
+  [[ "$(s3_url_for "${u}" 2504)" == "https://1000genomes.s3.amazonaws.com/1000G_2504_high_coverage/data/ERR3239480/NA12718.final.cram" ]] \
+    || { echo "FAIL: 2504 mapping"; exit 1; }
+  [[ "$(s3_url_for "${u}.crai" 698)" == "https://1000genomes.s3.amazonaws.com/1000G_2504_high_coverage/additional_698_related/data/ERR3239480/NA12718.final.cram.crai" ]] \
+    || { echo "FAIL: 698 mapping"; exit 1; }
+  [[ -z "$(s3_url_for "${u}" "")" ]] || { echo "FAIL: unknown batch must not map"; exit 1; }
+  [[ -z "$(s3_url_for "ftp://elsewhere.org/x.cram" 2504)" ]] || { echo "FAIL: foreign URL must not map"; exit 1; }
+  S3_HTTPS_BASE=""
+  [[ -z "$(s3_url_for "${u}" 2504)" ]] || { echo "FAIL: empty base must disable"; exit 1; }
+) || exit 1
+echo "PASS: s3_url_for maps both batches, refuses the unmappable, and can be disabled"
+
+mkdir -p "${T}/work5/crams" "${T}/s3store"
+python3 - "${T}" <<'EOF'
+import hashlib, sys
+T = sys.argv[1]
+content = b"x1-bytes" * 120
+open(f"{T}/s3store/X1.final.cram", "wb").write(content)
+open(f"{T}/s3store/X1.final.cram.crai", "wb").write(b"cx1")
+base = "ftp://ftp.sra.ebi.ac.uk/vol1/run/ERRX/ERRX123/X1.final.cram"
+with open(f"{T}/work5/manifest.tsv", "w") as out:
+    out.write("SAMPLE\tCRAM\tCRAI\tMD5\tRELEASE_BATCH\n")
+    out.write(f"X1\t{base}\t{base}.crai\t{hashlib.md5(content).hexdigest()}\t2504\n")
+EOF
+WORK_DIR="${T}/work5" \
+SIF_IMAGE="${T}/work/ngs-pca.sif" \
+REF_DIR="${T}/work/reference" \
+REF_FASTA="${T}/work/reference/ref.fa" \
+MANIFEST="${T}/work5/manifest.tsv" \
+MIN_MANIFEST_SAMPLES=1 EXPECTED_MANIFEST_SAMPLES=1 \
+USE_ASPERA=0 COMPARE_FAST_MODE=1 DOWNLOADER_LOCAL=1 DOWNLOAD_SLOTS=1 \
+FAKE_S3="${T}/s3store" FAKE_REMOTE="${T}/remote" \
+bash "${HERE}/01_download_and_mosdepth.sh" > "${T}/s3run.log" 2>&1 \
+  || { echo "FAIL: S3-served sweep should succeed"; cat "${T}/s3run.log" "${T}/work5/logs/download_X1.log" 2>/dev/null; exit 1; }
+grep -q "aria2c download complete (S3," "${T}/work5/logs/download_X1.log" \
+  || { echo "FAIL: S3 should have served the download"; cat "${T}/work5/logs/download_X1.log"; exit 1; }
+check "S3-served sample reached both trees" test -s "${T}/work5/mosdepth_output/X1.by1000.regions.bed.gz" \
+  -a -s "${T}/work5/mosdepth_output_fast/X1.by1000.regions.bed.gz"
+echo "PASS: S3 mirror preferred and served end to end"
+
+echo "=== aria2c resolution: host, bespoke image, neither ==="
+sed -n '/^resolve_aria2c()/,/^}/p' "${HERE}/01_download_and_mosdepth.sh" > "${T}/a2fn.sh"
+mkdir -p "${T}/bin_noaria"
+for stub in "${T}/bin/"*; do
+  [[ "$(basename "${stub}")" == "aria2c" ]] && continue
+  ln -sf "${stub}" "${T}/bin_noaria/$(basename "${stub}")"
+done
+# bash for the stubs' env shebangs; nothing else, because the runner's system
+# dirs may hold a real aria2c (GitHub's Ubuntu image ships one), and this
+# case exists to test its absence
+ln -sf "$(command -v bash)" "${T}/bin_noaria/bash"
+echo "sif" > "${T}/fake_aria2.sif"   # non-empty: the resolver refuses a half-built image
+(
+  set -u
+  ARIA2C=(); ARIA2C_HOW=""; CRAM_DIR="${T}/work/crams"; ARIA2_SIF="${T}/fake_aria2.sif"
+  source "${T}/a2fn.sh"
+  resolve_aria2c || { echo "FAIL: host aria2c should resolve"; exit 1; }
+  [[ "${ARIA2C[0]}" == "aria2c" && "${ARIA2C_HOW}" == "host" ]] \
+    || { echo "FAIL: host resolution: ${ARIA2C[*]} / ${ARIA2C_HOW}"; exit 1; }
+
+  PATH="${T}/bin_noaria"
+  ARIA2C=(); ARIA2C_HOW=""
+  resolve_aria2c || { echo "FAIL: image aria2c should resolve"; exit 1; }
+  [[ "${ARIA2C[0]}" == "apptainer" && "${ARIA2C_HOW}" == *"fake_aria2.sif"* ]] \
+    || { echo "FAIL: image resolution: ${ARIA2C[*]} / ${ARIA2C_HOW}"; exit 1; }
+
+  ARIA2_SIF="${T}/nonexistent.sif"
+  ARIA2C=(); ARIA2C_HOW=""
+  resolve_aria2c && { echo "FAIL: nothing available must not resolve"; exit 1; }
+  (( ${#ARIA2C[@]} == 0 )) || { echo "FAIL: array should stay empty"; exit 1; }
+) || exit 1
+echo "PASS: aria2c resolves to the host, then the bespoke image, then cleanly to nothing"
 
 echo "=== Stage watcher: dispatch on arrival, re-dispatch after premature MD5, park the hopeless ==="
 mkdir -p "${T}/work3/crams"

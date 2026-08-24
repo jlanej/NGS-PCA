@@ -109,6 +109,16 @@ if [[ -z "${SLURM_JOB_ID:-}" && "${DOWNLOADER_LOCAL:-0}" != "1" ]]; then
       echo "  Continuing without Aspera; downloads will use parallel HTTPS."
     fi
   fi
+  # aria2c the same way when the host lacks it: a small bespoke image, built
+  # once on the submit host. Non-fatal - parallel curl remains the fallback.
+  if ! command -v aria2c &>/dev/null && command -v apptainer &>/dev/null \
+     && [[ ! -s "${ARIA2_SIF}" ]]; then
+    echo "Provisioning aria2 image (one-time)..."
+    if ! apptainer build --fakeroot "${ARIA2_SIF}" "${SCRIPT_DIR}/aria2.def"; then
+      rm -f "${ARIA2_SIF}"
+      echo "  Continuing without aria2c; HTTPS downloads will use parallel curl."
+    fi
+  fi
   echo "Submitting the download manager (${DOWNLOAD_SLOTS} concurrent downloads)..."
   echo "  Manager log: ${LOG_DIR}/download_manager_<jobid>.out"
   echo "  Per-sample download logs: ${LOG_DIR}/download_<sample>.log"
@@ -184,6 +194,31 @@ https_url_for() {
   echo "${ftp_url/ftp:\/\/ftp.sra.ebi.ac.uk/${ENA_HTTPS_BASE}}"
 }
 
+# The AWS Open Data mirror of the same files, or empty when the URL does not
+# map or the mirror is disabled. Verified byte-identical to ENA's copies
+# (content lengths match exactly, and every file passes the manifest MD5), it
+# serves with S3 throughput and free egress - the preferred source, with ENA
+# as fallback. The layout drops ENA's run-prefix grouping level and splits the
+# release batches:
+#   vol1/run/ERR324/ERR3239480/NA12718.final.cram (batch 2504)
+#     -> 1000G_2504_high_coverage/data/ERR3239480/NA12718.final.cram
+#   batch 698 -> 1000G_2504_high_coverage/additional_698_related/data/...
+s3_url_for() {
+  local ftp_url="$1" batch="$2"
+  [[ -n "${S3_HTTPS_BASE}" ]] || { echo ""; return 0; }
+  if [[ "${ftp_url}" != ftp://ftp.sra.ebi.ac.uk/vol1/run/*/*/* ]]; then
+    echo ""
+    return 0
+  fi
+  local rest="${ftp_url#ftp://ftp.sra.ebi.ac.uk/vol1/run/}"
+  local run_and_file="${rest#*/}"
+  case "${batch}" in
+    2504) echo "${S3_HTTPS_BASE}/1000G_2504_high_coverage/data/${run_and_file}" ;;
+    698) echo "${S3_HTTPS_BASE}/1000G_2504_high_coverage/additional_698_related/data/${run_and_file}" ;;
+    *) echo "" ;;
+  esac
+}
+
 # Content-Length of a remote file, or empty if it cannot be determined.
 # Uses tolower() rather than gawk's IGNORECASE so this also works under the
 # BSD awk and mawk found on some systems.
@@ -197,14 +232,34 @@ local_size() {
   stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null
 }
 
+# aria2c as a command array: the host's when present, else the bespoke
+# aria2.sif built at submission (see aria2.def - kept out of the analysis
+# image on purpose). The same-path bind makes --dir/--out resolve identically
+# inside the container; apptainer shares the host network.
+ARIA2C=()
+ARIA2C_HOW=""
+resolve_aria2c() {
+  if command -v aria2c &>/dev/null; then
+    ARIA2C=(aria2c)
+    ARIA2C_HOW="host"
+    return 0
+  fi
+  if command -v apptainer &>/dev/null && [[ -s "${ARIA2_SIF}" ]] \
+     && apptainer exec "${ARIA2_SIF}" aria2c --version &>/dev/null; then
+    ARIA2C=(apptainer exec --bind "${CRAM_DIR}" "${ARIA2_SIF}" aria2c)
+    ARIA2C_HOW="via ${ARIA2_SIF} (apptainer)"
+    return 0
+  fi
+  return 1
+}
+
 download_aria2() {
+  local url="$1"
   local dest="$2"
-  local url
-  url="$(https_url_for "$1")"
 
-  command -v aria2c &>/dev/null || return 1
+  (( ${#ARIA2C[@]} )) || return 1
 
-  if ! aria2c \
+  if ! "${ARIA2C[@]}" \
     --quiet=true \
     --continue=true \
     --max-connection-per-server="${DOWNLOAD_CONNECTIONS}" \
@@ -225,9 +280,9 @@ download_aria2() {
 
 # Parallel byte-range download using only curl, for hosts without aria2c.
 download_curl_parallel() {
+  local url="$1"
   local dest="$2"
-  local url total chunk parts_dir rc=0 i pid
-  url="$(https_url_for "$1")"
+  local total chunk parts_dir rc=0 i pid
 
   command -v curl &>/dev/null || return 1
 
@@ -289,23 +344,36 @@ download_wget() {
   fi
 }
 
-# Try each transport in descending order of speed. Returns non-zero only when
-# every available method failed.
+# Try each source (S3 mirror first, then ENA) with each transport in
+# descending order of speed. Returns non-zero only when everything failed.
 download_file() {
-  local url="$1" dest="$2" label="$3"
+  local url="$1" dest="$2" label="$3" batch="${4:-}"
 
   if download_aspera "${url}" "${dest}"; then
     echo "  ${label}: Aspera download complete."
     return 0
   fi
-  if download_aria2 "${url}" "${dest}"; then
-    echo "  ${label}: aria2c download complete (${DOWNLOAD_CONNECTIONS} streams)."
-    return 0
+
+  local sources=() source_names=() https
+  https="$(s3_url_for "${url}" "${batch}")"
+  if [[ -n "${https}" ]]; then
+    sources+=("${https}")
+    source_names+=("S3")
   fi
-  if download_curl_parallel "${url}" "${dest}"; then
-    echo "  ${label}: parallel curl download complete (${DOWNLOAD_CONNECTIONS} ranges)."
-    return 0
-  fi
+  sources+=("$(https_url_for "${url}")")
+  source_names+=("ENA")
+
+  local i
+  for i in "${!sources[@]}"; do
+    if download_aria2 "${sources[${i}]}" "${dest}"; then
+      echo "  ${label}: aria2c download complete (${source_names[${i}]}, ${DOWNLOAD_CONNECTIONS} streams)."
+      return 0
+    fi
+    if download_curl_parallel "${sources[${i}]}" "${dest}"; then
+      echo "  ${label}: parallel curl download complete (${source_names[${i}]}, ${DOWNLOAD_CONNECTIONS} ranges)."
+      return 0
+    fi
+  done
   if download_wget "${url}" "${dest}"; then
     echo "  ${label}: wget download complete (single stream)."
     return 0
@@ -316,9 +384,9 @@ download_file() {
 
 # ── One download slot: fetch, verify, hand off to mosdepth ──────────────────
 
-# download_sample <sample> <line_num> <cram_url> <crai_url> <md5>
+# download_sample <sample> <line_num> <cram_url> <crai_url> <md5> [batch]
 download_sample() {
-  local sample="$1" line_num="$2" cram_url="$3" crai_url="$4" cram_md5="$5"
+  local sample="$1" line_num="$2" cram_url="$3" crai_url="$4" cram_md5="$5" batch="${6:-}"
   local local_cram="${CRAM_DIR}/${sample}.cram"
   local local_crai="${CRAM_DIR}/${sample}.cram.crai"
 
@@ -335,7 +403,7 @@ download_sample() {
   for download_attempt in 1 2; do
     if [[ ! -f "${local_cram}" ]]; then
       echo "[1/2] Downloading CRAM..."
-      if ! download_file "${cram_url}" "${local_cram}" "CRAM"; then
+      if ! download_file "${cram_url}" "${local_cram}" "CRAM" "${batch}"; then
         return 1
       fi
     else
@@ -344,7 +412,7 @@ download_sample() {
 
     if [[ ! -f "${local_crai}" ]]; then
       echo "  Downloading CRAI..."
-      if ! download_file "${crai_url}" "${local_crai}" "CRAI"; then
+      if ! download_file "${crai_url}" "${local_crai}" "CRAI" "${batch}"; then
         rm -f "${local_cram}"
         return 1
       fi
@@ -446,6 +514,12 @@ else
   echo "  Fast-mode comparison: off - single mosdepth run per sample. If this cohort is for"
   echo "  the comparison, stop and set COMPARE_FAST_MODE=1 (export it, or pin it in config.sh)."
 fi
+resolve_aria2c || true
+if (( ${#ARIA2C[@]} )); then
+  echo "  aria2c: ${ARIA2C_HOW}"
+else
+  echo "  aria2c: not available - HTTPS transfers use parallel curl (${DOWNLOAD_CONNECTIONS} ranges)"
+fi
 echo "  Already done:        ${SKIPPED_DONE}"
 echo "  mosdepth in flight:  ${SKIPPED_IN_FLIGHT}"
 echo "  To download:         ${#NEEDED_LINES[@]} (${DOWNLOAD_SLOTS} at a time)"
@@ -486,11 +560,11 @@ for idx in "${!NEEDED_LINES[@]}"; do
     done
   fi
   line=$(sed -n "${line_num}p" "${MANIFEST}")
-  IFS=$'\t' read -r _ CRAM_URL CRAI_URL CRAM_MD5 _ <<< "${line}"
+  IFS=$'\t' read -r _ CRAM_URL CRAI_URL CRAM_MD5 RELEASE_BATCH _ <<< "${line}"
 
   echo "[$(date '+%H:%M:%S')] slot -> ${sample} (log: ${LOG_DIR}/download_${sample}.log)"
   (
-    if download_sample "${sample}" "${line_num}" "${CRAM_URL}" "${CRAI_URL}" "${CRAM_MD5}"; then
+    if download_sample "${sample}" "${line_num}" "${CRAM_URL}" "${CRAI_URL}" "${CRAM_MD5}" "${RELEASE_BATCH}"; then
       echo "ok" > "${RESULT_DIR}/${sample}"
     else
       echo "fail" > "${RESULT_DIR}/${sample}"

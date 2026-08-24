@@ -567,9 +567,32 @@ bash 00_setup.sh
 
 ## Download methods
 
-The pipeline downloads CRAMs from the ENA FTP and reference data from the EBI 1000G FTP. Three download methods are available (in order of speed):
+The pipeline downloads CRAMs from the ENA FTP and reference data from the EBI 1000G FTP, with
+one important exception that usually decides the cohort's pace:
 
-### 1. Aspera (optional, fastest)
+### 0. AWS Open Data mirror (default HTTPS source)
+
+The NYGC 30x CRAMs are mirrored in the [AWS Open Data Program](https://registry.opendata.aws/1000-genomes/)
+at `s3://1000genomes/1000G_2504_high_coverage/` — verified **byte-identical** to ENA's copies
+(content lengths match exactly, and every file passes the manifest MD5), served anonymously over
+HTTPS with range support and free egress. Nothing at EBI — shared DTNs, FASP congestion,
+throttling — is in the path, and S3 read throughput is effectively unbounded from a
+well-connected site.
+
+The manager's HTTPS transports (aria2c, parallel curl) try this mirror **before** ENA
+automatically; the transport census in the download logs shows which source served each file
+(`aria2c download complete (S3, ...)`). Set `S3_HTTPS_BASE=""` to disable it. When the mirror is
+healthy, it typically outruns both Aspera and Globus — pair it with aria2c and a modest
+`DOWNLOAD_SLOTS` becomes multi-Gbit/s.
+
+No host aria2c is needed for that: at submission the manager builds a small bespoke `aria2.sif`
+from [`aria2.def`](aria2.def) and runs it via apptainer — deliberately **not** part of the
+analysis image, whose contents decide scientific results while a downloader changes on
+operational grounds. The manager's startup lines say which aria2c was found (host, image, or
+none, in which case parallel curl carries the load). Like `aspera.def`, building needs
+`apptainer build --fakeroot`; sites without it keep the curl fallback.
+
+### 1. Aspera (optional)
 
 [IBM Aspera Connect](https://www.ibm.com/products/aspera/downloads) uses the FASP protocol for high-speed transfers typically 10–100× faster than FTP/HTTP. Install it on your HPC system or load it as a module:
 
