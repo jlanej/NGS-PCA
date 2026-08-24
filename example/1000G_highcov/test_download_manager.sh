@@ -285,6 +285,35 @@ check "S3-served sample reached both trees" test -s "${T}/work5/mosdepth_output/
   -a -s "${T}/work5/mosdepth_output_fast/X1.by1000.regions.bed.gz"
 echo "PASS: S3 mirror preferred and served end to end"
 
+echo "=== aria2c resolution: host, bespoke image, neither ==="
+sed -n '/^resolve_aria2c()/,/^}/p' "${HERE}/01_download_and_mosdepth.sh" > "${T}/a2fn.sh"
+mkdir -p "${T}/bin_noaria"
+for stub in "${T}/bin/"*; do
+  [[ "$(basename "${stub}")" == "aria2c" ]] && continue
+  ln -sf "${stub}" "${T}/bin_noaria/$(basename "${stub}")"
+done
+echo "sif" > "${T}/fake_aria2.sif"   # non-empty: the resolver refuses a half-built image
+(
+  set -u
+  ARIA2C=(); ARIA2C_HOW=""; CRAM_DIR="${T}/work/crams"; ARIA2_SIF="${T}/fake_aria2.sif"
+  source "${T}/a2fn.sh"
+  resolve_aria2c || { echo "FAIL: host aria2c should resolve"; exit 1; }
+  [[ "${ARIA2C[0]}" == "aria2c" && "${ARIA2C_HOW}" == "host" ]] \
+    || { echo "FAIL: host resolution: ${ARIA2C[*]} / ${ARIA2C_HOW}"; exit 1; }
+
+  PATH="${T}/bin_noaria:/usr/bin:/bin"
+  ARIA2C=(); ARIA2C_HOW=""
+  resolve_aria2c || { echo "FAIL: image aria2c should resolve"; exit 1; }
+  [[ "${ARIA2C[0]}" == "apptainer" && "${ARIA2C_HOW}" == *"fake_aria2.sif"* ]] \
+    || { echo "FAIL: image resolution: ${ARIA2C[*]} / ${ARIA2C_HOW}"; exit 1; }
+
+  ARIA2_SIF="${T}/nonexistent.sif"
+  ARIA2C=(); ARIA2C_HOW=""
+  resolve_aria2c && { echo "FAIL: nothing available must not resolve"; exit 1; }
+  (( ${#ARIA2C[@]} == 0 )) || { echo "FAIL: array should stay empty"; exit 1; }
+) || exit 1
+echo "PASS: aria2c resolves to the host, then the bespoke image, then cleanly to nothing"
+
 echo "=== Stage watcher: dispatch on arrival, re-dispatch after premature MD5, park the hopeless ==="
 mkdir -p "${T}/work3/crams"
 python3 - "${T}" <<'EOF'

@@ -109,6 +109,16 @@ if [[ -z "${SLURM_JOB_ID:-}" && "${DOWNLOADER_LOCAL:-0}" != "1" ]]; then
       echo "  Continuing without Aspera; downloads will use parallel HTTPS."
     fi
   fi
+  # aria2c the same way when the host lacks it: a small bespoke image, built
+  # once on the submit host. Non-fatal - parallel curl remains the fallback.
+  if ! command -v aria2c &>/dev/null && command -v apptainer &>/dev/null \
+     && [[ ! -s "${ARIA2_SIF}" ]]; then
+    echo "Provisioning aria2 image (one-time)..."
+    if ! apptainer build --fakeroot "${ARIA2_SIF}" "${SCRIPT_DIR}/aria2.def"; then
+      rm -f "${ARIA2_SIF}"
+      echo "  Continuing without aria2c; HTTPS downloads will use parallel curl."
+    fi
+  fi
   echo "Submitting the download manager (${DOWNLOAD_SLOTS} concurrent downloads)..."
   echo "  Manager log: ${LOG_DIR}/download_manager_<jobid>.out"
   echo "  Per-sample download logs: ${LOG_DIR}/download_<sample>.log"
@@ -222,13 +232,34 @@ local_size() {
   stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null
 }
 
+# aria2c as a command array: the host's when present, else the bespoke
+# aria2.sif built at submission (see aria2.def - kept out of the analysis
+# image on purpose). The same-path bind makes --dir/--out resolve identically
+# inside the container; apptainer shares the host network.
+ARIA2C=()
+ARIA2C_HOW=""
+resolve_aria2c() {
+  if command -v aria2c &>/dev/null; then
+    ARIA2C=(aria2c)
+    ARIA2C_HOW="host"
+    return 0
+  fi
+  if command -v apptainer &>/dev/null && [[ -s "${ARIA2_SIF}" ]] \
+     && apptainer exec "${ARIA2_SIF}" aria2c --version &>/dev/null; then
+    ARIA2C=(apptainer exec --bind "${CRAM_DIR}" "${ARIA2_SIF}" aria2c)
+    ARIA2C_HOW="via ${ARIA2_SIF} (apptainer)"
+    return 0
+  fi
+  return 1
+}
+
 download_aria2() {
   local url="$1"
   local dest="$2"
 
-  command -v aria2c &>/dev/null || return 1
+  (( ${#ARIA2C[@]} )) || return 1
 
-  if ! aria2c \
+  if ! "${ARIA2C[@]}" \
     --quiet=true \
     --continue=true \
     --max-connection-per-server="${DOWNLOAD_CONNECTIONS}" \
@@ -482,6 +513,12 @@ if [[ "${COMPARE_FAST_MODE}" == "1" ]]; then
 else
   echo "  Fast-mode comparison: off - single mosdepth run per sample. If this cohort is for"
   echo "  the comparison, stop and set COMPARE_FAST_MODE=1 (export it, or pin it in config.sh)."
+fi
+resolve_aria2c || true
+if (( ${#ARIA2C[@]} )); then
+  echo "  aria2c: ${ARIA2C_HOW}"
+else
+  echo "  aria2c: not available - HTTPS transfers use parallel curl (${DOWNLOAD_CONNECTIONS} ranges)"
 fi
 echo "  Already done:        ${SKIPPED_DONE}"
 echo "  mosdepth in flight:  ${SKIPPED_IN_FLIGHT}"
