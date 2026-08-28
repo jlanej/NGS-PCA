@@ -20,7 +20,7 @@
 #SBATCH --output=logs/ngspca_%j.out
 #SBATCH --error=logs/ngspca_%j.err
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=256G
+#SBATCH --mem=248G
 #SBATCH --time=12:00:00
 
 set -euo pipefail
