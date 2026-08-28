@@ -40,6 +40,23 @@ source "${CONFIG_FILE}"
 # Ensure log and output directories exist
 mkdir -p "${LOG_DIR}" "${NGSPCA_OUTPUT}"
 
+# The exclusion BED must be visible INSIDE the container, where ngspca runs.
+# The image ships its own copy under /app/resources, so that path passes
+# through as-is; any host path - config's repo default included - is
+# normalized (the ../.. resolved) and its directory bound into the container.
+BED_BIND=()
+if [[ "${BED_EXCLUDE}" == /app/resources/* ]]; then
+  BED_IN_CONTAINER="${BED_EXCLUDE}"
+else
+  BED_DIR="$(cd "$(dirname "${BED_EXCLUDE}")" && pwd)"
+  BED_IN_CONTAINER="${BED_DIR}/$(basename "${BED_EXCLUDE}")"
+  if [[ ! -f "${BED_IN_CONTAINER}" ]]; then
+    echo "ERROR: bedExclude not found on the host: ${BED_EXCLUDE}"
+    exit 1
+  fi
+  BED_BIND=(--bind "${BED_DIR}")
+fi
+
 echo "============================================================"
 echo " NGS-PCA — 1000G High-Coverage (${NUM_PC} PCs)"
 echo "============================================================"
@@ -53,7 +70,7 @@ echo "   oversample   = ${OVERSAMPLE}"
 echo "   randomSeed   = ${RANDOM_SEED}"
 echo "   threads      = ${NGSPCA_THREADS}"
 echo "   sampleEvery  = ${SAMPLE_EVERY}"
-echo "   bedExclude   = ${BED_EXCLUDE}"
+echo "   bedExclude   = ${BED_IN_CONTAINER}"
 echo "   xmx          = ${XMX}"
 echo ""
 echo " Started: $(date)"
@@ -80,6 +97,7 @@ echo "Running NGS-PCA..."
 apptainer run \
   --bind "${MOSDEPTH_DIR}":/mosdepth \
   --bind "${NGSPCA_OUTPUT}":/output \
+  ${BED_BIND[@]+"${BED_BIND[@]}"} \
   --env "JAVA_TOOL_OPTIONS=-Xmx${XMX}" \
   "${SIF_IMAGE}" \
   -input /mosdepth/ \
@@ -91,7 +109,7 @@ apptainer run \
   -oversample "${OVERSAMPLE}" \
   -randomSeed "${RANDOM_SEED}" \
   -distribution UNIFORM \
-  -bedExclude "${BED_EXCLUDE}"
+  -bedExclude "${BED_IN_CONTAINER}"
 
 echo ""
 echo "============================================================"
