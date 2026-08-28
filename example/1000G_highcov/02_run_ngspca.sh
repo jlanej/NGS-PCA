@@ -7,7 +7,7 @@
 # 01_download_and_mosdepth.sh.
 #
 # Resource requirements depend on sample count:
-#   - 3,202 samples × ~200 PCs: ~256 GB RAM, ~32 threads, ~6–12 h walltime
+#   - 3,202 samples × ~200 PCs: ~248 GB RAM, 24 threads, ~6–12 h walltime
 #   - Larger cohorts (e.g. 142k): ~1800 GB RAM, 120 threads, ~60 h
 # Adjust #SBATCH directives below to match your cluster.
 #
@@ -19,7 +19,7 @@
 #SBATCH --job-name=1kG_ngspca
 #SBATCH --output=logs/ngspca_%j.out
 #SBATCH --error=logs/ngspca_%j.err
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=24
 #SBATCH --mem=248G
 #SBATCH --time=12:00:00
 

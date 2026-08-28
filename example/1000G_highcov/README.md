@@ -41,7 +41,7 @@ No additional software installation is required beyond [Apptainer](https://appta
 | **SLURM** | Adjust `#SBATCH` directives if using PBS/SGE/LSF |
 | **Internet access** | Needed on the node running `00_setup.sh` and the compute nodes running `01_download_and_mosdepth.sh` |
 | **Disk space** | ~50 GB for mosdepth outputs (kept), ~3 GB for reference, ~25 GB peak per CRAM (cleaned up) |
-| **Memory** | Step 01: 4 GB/task; Step 02: ~256 GB for 3,202 samples |
+| **Memory** | Step 01: 8 GB per mosdepth job; Step 02: ~248 GB for 3,202 samples |
 
 ---
 
@@ -297,7 +297,7 @@ Once all mosdepth results are available, this single job computes ~200 PCs using
 | `-iters` | 10 | Power iterations — sufficient for large cohorts (10K+) |
 | `-oversample` | 200 | Oversampling parameter — improves approximation quality |
 | `-randomSeed` | 42 | Fixed seed for reproducibility |
-| `-threads` | 32 | Parallel loading of mosdepth BED files |
+| `-threads` | 24 | Parallel loading of mosdepth BED files and decomposition steps |
 | `-sampleEvery` | 0 | Use all genomic bins (no downsampling) |
 | `-distribution` | UNIFORM | Random matrix distribution (see [docs/random-matrix-distribution.md](../../docs/random-matrix-distribution.md)) |
 | `-bedExclude` | bundled GRCh38 BED | Excludes SV blacklists, low-mappability, segmental duplications |
@@ -306,8 +306,8 @@ Once all mosdepth results are available, this single job computes ~200 PCs using
 
 | Resource | Estimate |
 |---|---|
-| Memory | ~256 GB |
-| CPUs | 32 |
+| Memory | ~248 GB (fits a 256 GB node with OS headroom) |
+| CPUs | 24 |
 | Walltime | 6–12 hours |
 | Disk (output) | ~500 MB |
 
@@ -553,7 +553,7 @@ bash 00_setup.sh
 | `ITERS` | `10` | Power iterations for randomized SVD |
 | `OVERSAMPLE` | `200` | Oversampling parameter |
 | `RANDOM_SEED` | `42` | Random seed for reproducibility |
-| `NGSPCA_THREADS` | `32` | Threads for loading BED files |
+| `NGSPCA_THREADS` | `24` | Threads for loading BED files and the parallel decomposition steps |
 | `BED_EXCLUDE` | `../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz` (from `config.sh` dir, fallback `/app/resources/...`) | Exclusion BED for NGS-PCA and HQ autosomal coverage stats |
 | `ASPERA_BANDWIDTH` | `100m` | Per-transfer FASP target rate; × `DOWNLOAD_SLOTS` = aggregate asked of EBI |
 | `ASPERA_RETRIES` | `3` | ascp attempts per file, resuming the partial with `-k 2`, before HTTPS fallback |

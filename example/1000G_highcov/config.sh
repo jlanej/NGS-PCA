@@ -197,7 +197,7 @@ NUM_PC="${NUM_PC:-200}"
 ITERS="${ITERS:-10}"
 OVERSAMPLE="${OVERSAMPLE:-200}"
 RANDOM_SEED="${RANDOM_SEED:-42}"
-NGSPCA_THREADS="${NGSPCA_THREADS:-32}"
+NGSPCA_THREADS="${NGSPCA_THREADS:-24}"
 SAMPLE_EVERY="${SAMPLE_EVERY:-0}"
 BED_EXCLUDE_REPO_DEFAULT="${CONFIG_DIR}/../../resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz"
 BED_EXCLUDE_CONTAINER_DEFAULT="/app/resources/GRCh38/ngs_pca_exclude.sv_blacklist.map.kmer.50.1.0.dgv.gsd.sorted.merge.bed.gz"
@@ -208,5 +208,6 @@ else
 fi
 BED_EXCLUDE="${BED_EXCLUDE:-${BED_EXCLUDE_DEFAULT}}"
 # Java heap size — set slightly below SBATCH --mem to leave OS headroom.
-# For 3,202 samples × 200 PCs with SBATCH --mem=256G, 240g is appropriate.
+# For 3,202 samples × 200 PCs on a 256 GB node reserving --mem=248G, 240g
+# leaves ~8 GB for the OS and the JVM's own overhead.
 XMX="${XMX:-240g}"

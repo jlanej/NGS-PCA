@@ -33,7 +33,7 @@
 #SBATCH --job-name=cov_summary
 #SBATCH --output=logs/cov_summary_%j.out
 #SBATCH --error=logs/cov_summary_%j.err
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=24
 #SBATCH --mem=48G
 #SBATCH --time=04:00:00
 
