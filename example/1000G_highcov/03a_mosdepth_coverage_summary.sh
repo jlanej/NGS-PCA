@@ -96,7 +96,11 @@ if [[ "${HQ_ENABLED}" -eq 1 ]]; then
   echo " Exclude BED:   ${BED_EXCLUDE}"
   echo " HQ stats:      enabled (bins not overlapping exclude BED)"
 else
-  echo " HQ stats:      disabled (requires bedtools + BED_EXCLUDE)"
+  echo " HQ stats:      dispersion columns disabled (require bedtools + BED_EXCLUDE)"
+fi
+if [[ -s "${NGSPCA_MEDIAN_TABLE}" ]]; then
+  echo " HQ median:     will be taken from ${NGSPCA_MEDIAN_TABLE}"
+  echo "                (NGS-PCA's own median over exactly the bins PCA used)"
 fi
 echo ""
 
@@ -234,7 +238,38 @@ printf '%s\n' "${REGIONS_FILES[@]}" \
 
 echo "" >&2
 
-NROWS=$(tail -n +2 "${OUT_TSV}" | wc -l)
+# ── Prefer NGS-PCA's own HQ median where it exists ──────────────────────────
+# autosomal.median.txt reports each sample's median over exactly the
+# autosomal, exclusion-filtered bins PCA used - the definitionally right
+# denominator for mtDNA CN - and needs neither bedtools nor a second pass
+# over the data. It replaces HQ_MEDIAN_COV whenever present; the bedtools
+# path still fills the HQ dispersion columns when available. IDs on both
+# sides are truncated at the first dot, matching this script's own
+# sample-naming convention.
+MEDIAN_MATCHED=0
+if [[ -s "${NGSPCA_MEDIAN_TABLE}" ]]; then
+  MEDIAN_TMP="${OUT_TSV}.median.tmp"
+  awk -F'\t' -v OFS='\t' -v countfile="${PROGRESS_DIR}/median_matched" '
+    NR == FNR {
+      if (FNR > 1) {
+        id = $1
+        sub(/\..*$/, "", id)
+        med[id] = $2
+      }
+      next
+    }
+    FNR == 1 { print; next }
+    {
+      if ($1 in med) { $8 = sprintf("%.4f", med[$1]); matched++ }
+      print
+    }
+    END { print matched + 0 > countfile }
+  ' "${NGSPCA_MEDIAN_TABLE}" "${OUT_TSV}" > "${MEDIAN_TMP}"
+  mv "${MEDIAN_TMP}" "${OUT_TSV}"
+  MEDIAN_MATCHED=$(cat "${PROGRESS_DIR}/median_matched")
+fi
+
+NROWS=$(tail -n +2 "${OUT_TSV}" | wc -l | tr -d "[:space:]")
 
 echo ""
 echo "============================================================"
@@ -249,6 +284,12 @@ if [[ "${HQ_ENABLED}" -eq 1 ]]; then
   echo "          HQ_MEAN_COV  HQ_MEDIAN_COV  HQ_SD_COV  HQ_MAD_COV  HQ_IQR_COV"
 else
   echo " Columns: SAMPLE_ID  MEAN_COV  MEDIAN_COV  SD_COV  MAD_COV  IQR_COV"
-  echo "          HQ_* columns are NA (bedtools or BED_EXCLUDE not available)"
+  echo "          HQ dispersion columns are NA (bedtools or BED_EXCLUDE not available)"
+fi
+if (( MEDIAN_MATCHED > 0 )); then
+  echo " HQ_MEDIAN_COV: ${MEDIAN_MATCHED}/${NROWS} samples taken from ${NGSPCA_MEDIAN_TABLE}"
+elif [[ ! -s "${NGSPCA_MEDIAN_TABLE}" ]]; then
+  echo " NOTE: ${NGSPCA_MEDIAN_TABLE} not found - run 02_run_ngspca.sh first to"
+  echo "       source HQ_MEDIAN_COV from NGS-PCA's own bins (no bedtools needed)."
 fi
 echo "============================================================"

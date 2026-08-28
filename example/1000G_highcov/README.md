@@ -339,7 +339,7 @@ NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_fast" sbatch 02_run_ngspca.sh
 #    MTDNA_CN, coverage ratios, inferred sex - are compared between modes too
 sbatch 03a_mosdepth_coverage_summary.sh && bash 03_collect_qc.sh
 MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" QC_OUTPUT="${WORK_DIR}/qc_output_fast" \
-  sbatch 03a_mosdepth_coverage_summary.sh
+  NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_fast" sbatch 03a_mosdepth_coverage_summary.sh
 MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" QC_OUTPUT="${WORK_DIR}/qc_output_fast" \
   bash 03_collect_qc.sh
 

@@ -210,6 +210,31 @@ jobs:
           fi
           echo "PASS: sampleB values correct (uniform coverage: SD=MAD=IQR=0)"
 
+          # ── HQ median substitution from NGS-PCA's own table ──
+          # autosomal.median.txt (as 02 writes it, IDs carrying the file-name
+          # suffix) must replace HQ_MEDIAN_COV; other columns stay untouched
+          printf "SAMPLE\tAUTO_HQ_median\tN_BINS\n" > "${TEST_WORK}/autosomal.median.txt"
+          printf "sampleA.by1000.\t8.99\t15593\n" >> "${TEST_WORK}/autosomal.median.txt"
+          printf "sampleB.by1000.\t24.5\t15593\n" >> "${TEST_WORK}/autosomal.median.txt"
+          WORK_DIR="${TEST_WORK}" \
+          MOSDEPTH_DIR="${TEST_WORK}/mosdepth_output" \
+          QC_OUTPUT="${TEST_WORK}/qc_output" \
+          NGSPCA_MEDIAN_TABLE="${TEST_WORK}/autosomal.median.txt" \
+          bash 03a_mosdepth_coverage_summary.sh
+
+          HQ_A=$(awk -F'\t' '$1 == "sampleA" {print $8}' "${OUT}")
+          HQ_B=$(awk -F'\t' '$1 == "sampleB" {print $8}' "${OUT}")
+          MEAN_A2=$(awk -F'\t' '$1 == "sampleA" {print $2}' "${OUT}")
+          if [[ "${HQ_A}" != "8.9900" || "${HQ_B}" != "24.5000" ]]; then
+            echo "::error::HQ_MEDIAN_COV should come from the NGS-PCA table (got ${HQ_A}, ${HQ_B})"
+            exit 1
+          fi
+          if [[ "${MEAN_A2}" != "30.0000" ]]; then
+            echo "::error::median substitution must not touch other columns (mean became ${MEAN_A2})"
+            exit 1
+          fi
+          echo "PASS: HQ_MEDIAN_COV sourced from autosomal.median.txt, other columns untouched"
+
           echo ""
           echo "=== All mosdepth coverage summary tests passed ==="
 
