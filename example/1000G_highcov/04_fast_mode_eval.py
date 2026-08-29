@@ -91,7 +91,7 @@ def summarise(values):
     return {
         "n": len(values),
         "median": statistics.median(ordered),
-        "mean": statistics.fmean(ordered),
+        "mean": sum(ordered) / len(ordered),   # not statistics.fmean: that needs python 3.8
         "sd": statistics.pstdev(ordered) if len(ordered) > 1 else 0.0,
         "min": ordered[0],
         "max": ordered[-1],
