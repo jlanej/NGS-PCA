@@ -346,6 +346,12 @@ MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" QC_OUTPUT="${WORK_DIR}/qc_output
 # 4. Correlations, runtime boxplots, and a written summary
 #    (host python3; the figures need matplotlib, the tables do not)
 bash 04_fast_mode_eval.sh
+
+# 5. Everything as one shareable page: re-runs the eval inside a small
+#    python+matplotlib container (pulled from ghcr, no host deps) and writes
+#    a self-contained fast_mode_report.html - methods, figures, tables,
+#    generated interpretation; print to PDF from any browser
+bash 04b_fast_mode_report.sh
 ```
 
 The evaluation lands in `$QC_OUTPUT/fast_mode_eval/`: per-PC Pearson r with singular-value

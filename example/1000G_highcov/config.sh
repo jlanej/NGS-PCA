@@ -132,6 +132,10 @@ S3_HTTPS_BASE="${S3_HTTPS_BASE:-https://1000genomes.s3.amazonaws.com}"
 # is the fallback for forks and offline sites, and needs fakeroot.
 ARIA2_SIF="${ARIA2_SIF:-${WORK_DIR}/aria2.sif}"
 ARIA2_IMAGE_URI="${ARIA2_IMAGE_URI:-docker://ghcr.io/jlanej/ngs-pca:aria2}"
+# Python + matplotlib for the fast-mode evaluation report, provisioned the
+# same way: pull the CI-published tag, else build eval_report.def (fakeroot).
+EVAL_SIF="${EVAL_SIF:-${WORK_DIR}/eval.sif}"
+EVAL_IMAGE_URI="${EVAL_IMAGE_URI:-docker://ghcr.io/jlanej/ngs-pca:eval}"
 # NYGC CRAMs are on the ENA FTP; reference genome is on the 1000G FTP.
 ENA_ASPERA_USER="era-fasp@fasp.sra.ebi.ac.uk"
 EBI_ASPERA_USER="fasp-g1k@fasp.1000genomes.ebi.ac.uk"
