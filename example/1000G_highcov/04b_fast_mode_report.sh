@@ -101,7 +101,6 @@ if "${PY[@]}" -c "import numpy" 2>/dev/null; then
   # fast-mode differences against.
   SEED_PCS="${NGSPCA_SEED_CONTROL_OUTPUT}/svd.pcs.txt"
   if [[ -s "${SEED_PCS}" ]]; then
-    mkdir -p "${EVAL_OUT}/seed_control"
     "${PY[@]}" "${CONFIG_DIR}/04c_pc_set_concordance.py" \
       --normal "${NGSPCA_OUTPUT}/svd.pcs.txt" \
       --fast "${SEED_PCS}" \

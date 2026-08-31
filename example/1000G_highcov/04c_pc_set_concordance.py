@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
     label_a, label_b = args.label_a, args.label_b
+    os.makedirs(args.out_dir, exist_ok=True)
 
     n_samples, n_mat, n_k = read_pcs(args.normal)
     f_samples, f_mat, f_k = read_pcs(args.fast)
