@@ -867,7 +867,7 @@ jobs:
                         04_fast_mode_eval.sh test_download_manager.sh; do
             bash -n "${script}"
           done
-          python3 -m py_compile 04_fast_mode_eval.py 04b_fast_mode_report.py
+          python3 -m py_compile 04_fast_mode_eval.py 04b_fast_mode_report.py 04c_pc_set_concordance.py
           bash -n 04b_fast_mode_report.sh
           echo "PASS: scripts parse"
 
@@ -996,11 +996,20 @@ jobs:
           done
           echo "PASS: fast_mode_summary.png and fast_mode_qc.png written"
 
+          # set-level concordance (numpy came with matplotlib): the fixture's
+          # runs share their span up to the small planted perturbation
+          python3 04c_pc_set_concordance.py --normal "$F/normal/svd.pcs.txt" \
+            --fast "$F/fast/svd.pcs.txt" --out-dir "$F/out_plot"
+          FULLCOS=$(tail -1 "$F/out_plot/subspace_angles.tsv" | cut -f2)
+          awk -v c="$FULLCOS" 'BEGIN { exit !(c > 0.99) }' \
+            || { echo "::error::full-set canonical correlation should be ~1, got $FULLCOS"; exit 1; }
+          echo "PASS: subspace angles computed (full-set min cos $FULLCOS)"
+
           # the HTML report must assemble the figures and tables it just made
           python3 04b_fast_mode_report.py --eval-dir "$F/out_plot"
           HTML="$F/out_plot/fast_mode_report.html"
           [ -s "$HTML" ] || { echo "::error::report HTML missing"; exit 1; }
-          for needle in "data:image/png;base64" "Per-PC correlation" "Median mosdepth speedup" "MTDNA_CN"; do
+          for needle in "data:image/png;base64" "Per-PC correlation" "Median mosdepth speedup" "MTDNA_CN" "Principal angles between leading-k"; do
             grep -q "$needle" "$HTML" \
               || { echo "::error::report is missing: $needle"; exit 1; }
           done

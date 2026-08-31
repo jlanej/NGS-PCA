@@ -350,7 +350,10 @@ bash 04_fast_mode_eval.sh
 # 5. Everything as one shareable page: re-runs the eval inside a small
 #    python+matplotlib container (pulled from ghcr, no host deps) and writes
 #    a self-contained fast_mode_report.html - methods, figures, tables,
-#    generated interpretation; print to PDF from any browser
+#    generated interpretation, and the PC sets compared AS SUBSPACES
+#    (principal angles, per-PC containment, cross-correlation heatmap: rank
+#    swaps and rotations among near-degenerate PCs judged by span, which is
+#    all covariate adjustment sees); print to PDF from any browser
 bash 04b_fast_mode_report.sh
 ```
 

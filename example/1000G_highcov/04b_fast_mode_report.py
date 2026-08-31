@@ -75,6 +75,9 @@ def main():
     md_path = os.path.join(eval_dir, "fast_mode_report.md")
     md_text = open(md_path).read() if os.path.isfile(md_path) else ""
 
+    angles = read_tsv(os.path.join(eval_dir, "subspace_angles.tsv"))
+    containment = read_tsv(os.path.join(eval_dir, "pc_containment.tsv"))
+
     # ── Headline numbers, derived from the tables rather than trusted ────────
     abs_rs = [(row["PC"], float(row["abs_r"])) for row in pcs
               if row["abs_r"].lower() != "nan"]
@@ -127,6 +130,27 @@ def main():
         "means and dispersions while the PCs stay put, which is exactly the pattern that "
         "validates using fast mode for this pipeline.")
 
+    crosscorr_img = embed_png(os.path.join(eval_dir, "pc_crosscorr.png"))
+    if angles:
+        swaps = sum(1 for row in containment if row.get("best_match_fast_PC") != row.get("PC"))
+        contain_vals = sorted(float(row["containment_in_all_fast"]) for row in containment)
+        set_bits = [table_html(angles, list(angles[0].keys()),
+                               "Principal angles between leading-k subspaces")]
+        if crosscorr_img:
+            set_bits.append(f"<img src='{crosscorr_img}' alt='cross-correlation heatmap'>")
+        set_bits.append(
+            f"<p>Containment of each PC in the other run's full span: median "
+            f"{contain_vals[len(contain_vals) // 2]:.4f}, minimum {contain_vals[0]:.4f}; "
+            f"{swaps} of {len(containment)} PCs best-match a different index (rank swaps and "
+            f"rotations, localized in pc_containment.tsv). Small principal angles alongside a "
+            f"low matched-index |r| is the signature of rotation within near-degenerate "
+            f"clusters - the set agrees even where the indexing does not.</p>")
+        set_section = "".join(set_bits)
+    else:
+        set_section = ("<p class='missing'>Set-concordance outputs not found - run "
+                       "04b_fast_mode_report.sh via the eval container (numpy) to add "
+                       "principal angles, containment, and the cross-correlation heatmap.</p>")
+
     summary_img = embed_png(os.path.join(eval_dir, "fast_mode_summary.png"))
     qc_img = embed_png(os.path.join(eval_dir, "fast_mode_qc.png"))
 
@@ -139,6 +163,11 @@ def main():
     headline_cells = [
         ("Minimum |r|, PC1-PC" + str(len(pcs)), f"{fmt(min_abs_r)} (PC{min_pc})"),
     ]
+    if angles:
+        full = angles[-1]
+        headline_cells.append((f"Largest principal angle, all {full['k']} PCs as a set",
+                               f"{fmt(full['largest_angle_deg'], 2)}° (min canonical corr "
+                               f"{fmt(full['min_cos'], 4)})"))
     if speedup:
         headline_cells.append(("Median mosdepth speedup",
                                f"{fmt(speedup['median'], 2)}x (n = {speedup['n']})"))
@@ -206,6 +235,16 @@ signature of skipping mate-overlap correction - is invisible to correlation alon
 <h2>QC concordance</h2>
 {img_or_note(qc_img, "QC column agreement and MTDNA_CN scatter")}
 {table_html(qc, list(qc[0].keys()) if qc else [], "Per-column concordance of sample_qc.tsv")}
+
+<h2>The PC sets as subspaces</h2>
+<p>Matched-index correlation asks whether PC <i>i</i> is the same vector in both runs - the
+strictest test, and the wrong one deep in the spectrum, where near-equal singular values let
+components rotate into each other or swap rank without the <em>span</em> changing. Downstream
+use of these PCs as covariates depends only on that span, so the set-level questions are the
+operative ones: the largest principal angle between the leading-k subspaces bounds how
+differently any analysis using them as a set could behave, and per-PC containment measures how
+completely each component lives inside the other run's space regardless of index.</p>
+{set_section}
 
 <h2>Runtimes</h2>
 {table_html(timing, list(timing[0].keys()) if timing else [], "mosdepth wall-time statistics")}

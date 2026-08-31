@@ -76,6 +76,18 @@ fi
   --out "${EVAL_OUT}" \
   "$@"
 
+# Set-level concordance - principal angles, containment, cross-correlation -
+# needs numpy, which rides along with matplotlib in the eval image. Skipped
+# with a note otherwise; the report renders its absence honestly.
+if "${PY[@]}" -c "import numpy" 2>/dev/null; then
+  "${PY[@]}" "${CONFIG_DIR}/04c_pc_set_concordance.py" \
+    --normal "${NGSPCA_OUTPUT}/svd.pcs.txt" \
+    --fast "${NGSPCA_FAST_OUTPUT}/svd.pcs.txt" \
+    --out-dir "${EVAL_OUT}"
+else
+  echo "numpy not available - skipping the PC set-concordance section."
+fi
+
 "${PY[@]}" "${CONFIG_DIR}/04b_fast_mode_report.py" --eval-dir "${EVAL_OUT}"
 
 echo ""
