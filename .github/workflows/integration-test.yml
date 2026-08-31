@@ -877,7 +877,7 @@ jobs:
           python3 - <<'EOF'
           import math, os
           S = os.path.join(os.environ["RUNNER_TEMP"], "fastmode_fixture")
-          for d in ("normal", "fast", "timing"):
+          for d in ("normal", "fast", "seed_control", "timing"):
               os.makedirs(os.path.join(S, d), exist_ok=True)
           n, k = 40, 6
           samples = [f"s{i:03d}." for i in range(n)]
@@ -904,6 +904,15 @@ jobs:
               w[2] = w[2] + 0.01 * math.cos(sum(v))       # perturbation: |r| just under 1
               return w
           write("fast", fast)
+          # seed control: identical data, PC5/PC6 rotated 30 degrees into each
+          # other - the span is preserved exactly, so the full-set angle must
+          # vanish while a k=5 cut through the pair costs exactly one cosine
+          c, s30 = math.cos(math.radians(30)), math.sin(math.radians(30))
+          def reseed(v):
+              w = list(v)
+              w[4], w[5] = c * v[4] - s30 * v[5], s30 * v[4] + c * v[5]
+              return w
+          write("seed_control", reseed)
           for i, s in enumerate(samples):
               first = "normal" if i % 2 == 0 else "fast"
               for mode, wall in (("normal", 600 + i), ("fast", 300 + i // 2)):
@@ -1003,17 +1012,37 @@ jobs:
           FULLCOS=$(tail -1 "$F/out_plot/subspace_angles.tsv" | cut -f2)
           awk -v c="$FULLCOS" 'BEGIN { exit !(c > 0.99) }' \
             || { echo "::error::full-set canonical correlation should be ~1, got $FULLCOS"; exit 1; }
+          head -1 "$F/out_plot/subspace_angles.tsv" | grep -q "n_cos_below_0.99" \
+            || { echo "::error::cosine-count columns missing from subspace_angles.tsv"; exit 1; }
           echo "PASS: subspace angles computed (full-set min cos $FULLCOS)"
 
-          # the HTML report must assemble the figures and tables it just made
+          # seed-control calibration pair: the fixture's rotation preserves
+          # the span, so the full-set angle must vanish, the k=5 cut through
+          # the rotated pair must cost exactly one cosine, and the labels
+          # must reach the outputs
+          python3 04c_pc_set_concordance.py --normal "$F/normal/svd.pcs.txt" \
+            --fast "$F/seed_control/svd.pcs.txt" --label-b seed-control \
+            --out-dir "$F/out_plot/seed_control"
+          SEEDFULL=$(tail -1 "$F/out_plot/seed_control/subspace_angles.tsv" | cut -f3)
+          awk -v a="$SEEDFULL" 'BEGIN { exit !(a < 0.1) }' \
+            || { echo "::error::rotation preserves the span; full-set angle should be ~0, got $SEEDFULL"; exit 1; }
+          K5N99=$(awk -F'\t' '$1==5 {print $5}' "$F/out_plot/seed_control/subspace_angles.tsv")
+          [ "$K5N99" = "1" ] \
+            || { echo "::error::the k=5 cut through the rotated pair should cost exactly one cosine, got $K5N99"; exit 1; }
+          grep -q "normal vs seed-control" "$F/out_plot/seed_control/pc_set_concordance.md" \
+            || { echo "::error::seed-control label missing from the summary"; exit 1; }
+          echo "PASS: seed control - span preserved (angle $SEEDFULL), one straddled cosine at k=5"
+
+          # the HTML report must assemble the figures and tables it just made,
+          # the calibration section included
           python3 04b_fast_mode_report.py --eval-dir "$F/out_plot"
           HTML="$F/out_plot/fast_mode_report.html"
           [ -s "$HTML" ] || { echo "::error::report HTML missing"; exit 1; }
-          for needle in "data:image/png;base64" "Per-PC correlation" "Median mosdepth speedup" "MTDNA_CN" "Principal angles between leading-k"; do
+          for needle in "data:image/png;base64" "Per-PC correlation" "Median mosdepth speedup" "MTDNA_CN" "Principal angles between leading-k" "Calibration: seed change vs fast mode" "estimator noise alone"; do
             grep -q "$needle" "$HTML" \
               || { echo "::error::report is missing: $needle"; exit 1; }
           done
-          echo "PASS: self-contained HTML report assembled with embedded figures"
+          echo "PASS: self-contained HTML report assembled with embedded figures and calibration"
 
   download-manager-test:
     # The download manager and the mosdepth jobs it spawns, exercised

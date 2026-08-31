@@ -78,6 +78,18 @@ def main():
     angles = read_tsv(os.path.join(eval_dir, "subspace_angles.tsv"))
     containment = read_tsv(os.path.join(eval_dir, "pc_containment.tsv"))
 
+    # Seed-control calibration pair, when 04b_fast_mode_report.sh found a
+    # reseeded normal run: same tables, same analysis, different question.
+    seed_dir = os.path.join(eval_dir, "seed_control")
+    seed_angles = read_tsv(os.path.join(seed_dir, "subspace_angles.tsv"))
+    seed_containment = read_tsv(os.path.join(seed_dir, "pc_containment.tsv"))
+
+    def col(row, name, legacy):
+        # pc_containment.tsv column names went generic when the seed control
+        # arrived; accept tables written by either version.
+        value = row.get(name)
+        return value if value is not None else row.get(legacy)
+
     # ── Headline numbers, derived from the tables rather than trusted ────────
     abs_rs = [(row["PC"], float(row["abs_r"])) for row in pcs
               if row["abs_r"].lower() != "nan"]
@@ -132,8 +144,10 @@ def main():
 
     crosscorr_img = embed_png(os.path.join(eval_dir, "pc_crosscorr.png"))
     if angles:
-        swaps = sum(1 for row in containment if row.get("best_match_fast_PC") != row.get("PC"))
-        contain_vals = sorted(float(row["containment_in_all_fast"]) for row in containment)
+        swaps = sum(1 for row in containment
+                    if col(row, "best_match_other_PC", "best_match_fast_PC") != row.get("PC"))
+        contain_vals = sorted(float(col(row, "containment_in_all_other", "containment_in_all_fast"))
+                              for row in containment)
         set_bits = [table_html(angles, list(angles[0].keys()),
                                "Principal angles between leading-k subspaces")]
         if crosscorr_img:
@@ -150,6 +164,95 @@ def main():
         set_section = ("<p class='missing'>Set-concordance outputs not found - run "
                        "04b_fast_mode_report.sh via the eval container (numpy) to add "
                        "principal angles, containment, and the cross-correlation heatmap.</p>")
+
+    # ── Calibration: what does the estimator do to ITSELF under a reseed? ────
+    # Both PCA runs of the fast comparison share one seed, so estimator
+    # randomness contributed nothing there - every difference is caused by the
+    # fast-mode depths. The seed control recomputes the identical normal tree
+    # under a different -randomSeed: differences there are pure truncation
+    # noise, and they calibrate whether the fast-mode differences ever exceed
+    # what the estimator produces against itself.
+    calibration_section = ""
+    if angles and seed_angles:
+        seed_by_k = {row["k"]: row for row in seed_angles}
+        joined = [(row, seed_by_k[row["k"]]) for row in angles if row["k"] in seed_by_k]
+        have_counts = all("n_cos_below_0.99" in row and "n_cos_below_0.99" in s
+                          for row, s in joined)
+        cal_columns = ["k", "largest angle: fast vs normal", "largest angle: seed vs seed",
+                       "mean cos (fast)", "mean cos (seed)"]
+        if have_counts:
+            cal_columns.append("cosines < 0.99: fast / seed")
+        cal_rows = []
+        for row, s in joined:
+            cal_row = {
+                "k": row["k"],
+                "largest angle: fast vs normal": f"{float(row['largest_angle_deg']):.2f}°",
+                "largest angle: seed vs seed": f"{float(s['largest_angle_deg']):.2f}°",
+                "mean cos (fast)": fmt(row["mean_cos"], 4),
+                "mean cos (seed)": fmt(s["mean_cos"], 4),
+            }
+            if have_counts:
+                cal_row["cosines < 0.99: fast / seed"] = (
+                    f"{row['n_cos_below_0.99']} / {s['n_cos_below_0.99']}")
+            cal_rows.append(cal_row)
+        # A k where fast-vs-normal exceeds both twice the seed-control angle
+        # and +5 degrees is a candidate genuine fast-mode effect; anything
+        # inside that band is indistinguishable from the estimator's noise.
+        exceed = [(row["k"], float(row["largest_angle_deg"]), float(s["largest_angle_deg"]))
+                  for row, s in joined
+                  if float(row["largest_angle_deg"]) > 2 * float(s["largest_angle_deg"])
+                  and float(row["largest_angle_deg"]) - float(s["largest_angle_deg"]) > 5]
+
+        def tail_stats(rows):
+            values = [float(col(r, "containment_in_all_other", "containment_in_all_fast"))
+                      for r in rows]
+            return sum(1 for v in values if v < 0.9), min(values) if values else float("nan")
+        fast_low, fast_min = tail_stats(containment)
+        seed_low, seed_min = tail_stats(seed_containment)
+
+        if exceed:
+            listed = "; ".join(f"k = {k}: {fa:.1f}° vs {sa:.1f}°" for k, fa, sa in exceed)
+            verdict = (f"Fast-vs-normal exceeds the seed-control band at {listed} - candidate "
+                       f"genuine fast-mode effects worth inspecting; every other k sits within "
+                       f"what the estimator does to itself under a reseed alone.")
+        else:
+            verdict = ("At every evaluated k, the fast-vs-normal angle sits within the band the "
+                       "estimator produces against itself under a seed change alone. The "
+                       "fast-mode differences - the deep-tail behavior included - are "
+                       "indistinguishable from the randomized SVD's own truncation noise.")
+        verdict += (f" Containment tells the same story at the spectrum's edge: "
+                    f"{fast_low} PCs below 0.9 containment in the fast comparison (minimum "
+                    f"{fast_min:.2f}) against {seed_low} in the seed control (minimum "
+                    f"{seed_min:.2f}).")
+
+        cal_bits = [
+            "<h2>Calibration: seed change vs fast mode</h2>",
+            "<p>The fast-vs-normal comparison held the estimator fixed: one seed, one sample "
+            "order, so every difference above is <em>caused</em> by the fast-mode depths. This "
+            "section asks how large those differences are on the only meaningful scale - the "
+            "one the estimator sets itself. The identical normal tree was recomputed under a "
+            "different random seed and compared to the seed-42 run with the same subspace "
+            "analysis: those differences are pure truncation noise from the randomized SVD, "
+            "with byte-identical input data.</p>",
+            table_html(cal_rows, cal_columns,
+                       "Largest principal angle, fast-mode comparison vs seed-control calibration"),
+            f"<p>{html.escape(verdict)}</p>",
+        ]
+        seed_img = embed_png(os.path.join(seed_dir, "pc_crosscorr.png"))
+        if seed_img:
+            cal_bits.append(f"<img src='{seed_img}' alt='seed-control cross-correlation heatmap'>")
+            cal_bits.append("<p>The same diagnostic heatmap for the seed control - normal PCs "
+                            "against the reseeded run's. A diagonal band of the same character "
+                            "as the fast comparison's is the visual form of the verdict.</p>")
+        calibration_section = "".join(cal_bits)
+    elif angles:
+        calibration_section = (
+            "<h2>Calibration: seed change vs fast mode</h2>"
+            "<p class='missing'>No seed-control run found, so the numbers above lack their "
+            "yardstick: how much would the estimator alone move under a reseed? Recompute the "
+            "normal tree with a different seed, then re-run this report:<br>"
+            "<code>NGSPCA_OUTPUT=\"${WORK_DIR}/ngspca_output_seed43\" RANDOM_SEED=43 "
+            "sbatch 02_run_ngspca.sh</code></p>")
 
     summary_img = embed_png(os.path.join(eval_dir, "fast_mode_summary.png"))
     qc_img = embed_png(os.path.join(eval_dir, "fast_mode_qc.png"))
@@ -168,6 +271,11 @@ def main():
         headline_cells.append((f"Largest principal angle, all {full['k']} PCs as a set",
                                f"{fmt(full['largest_angle_deg'], 2)}° (min canonical corr "
                                f"{fmt(full['min_cos'], 4)})"))
+    if seed_angles:
+        seed_full = seed_angles[-1]
+        headline_cells.append((f"Seed-control angle, all {seed_full['k']} PCs as a set",
+                               f"{fmt(seed_full['largest_angle_deg'], 2)}° - estimator "
+                               f"noise alone"))
     if speedup:
         headline_cells.append(("Median mosdepth speedup",
                                f"{fmt(speedup['median'], 2)}x (n = {speedup['n']})"))
@@ -245,6 +353,7 @@ operative ones: the largest principal angle between the leading-k subspaces boun
 differently any analysis using them as a set could behave, and per-PC containment measures how
 completely each component lives inside the other run's space regardless of index.</p>
 {set_section}
+{calibration_section}
 
 <h2>Runtimes</h2>
 {table_html(timing, list(timing[0].keys()) if timing else [], "mosdepth wall-time statistics")}

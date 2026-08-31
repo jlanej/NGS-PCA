@@ -10,3 +10,4 @@ target/
 */bin
 example/test_output/
 example/test_output_gaussian/
+__pycache__/

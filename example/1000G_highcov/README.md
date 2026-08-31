@@ -330,10 +330,19 @@ expensive stage.
 export COMPARE_FAST_MODE=1
 bash 01_download_and_mosdepth.sh
 
-# 2. NGS-PCA on each tree — same parameters, seed, and exclusion bed
+# 2. NGS-PCA on each tree — same parameters, seed, and exclusion bed, so the
+#    estimator is held fixed and every PC difference is caused by the input
 sbatch 02_run_ngspca.sh
 MOSDEPTH_DIR="${WORK_DIR}/mosdepth_output_fast" \
 NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_fast" sbatch 02_run_ngspca.sh
+
+# 2b. Seed-control calibration: the NORMAL tree once more under a different
+#     -randomSeed. Identical data, different estimator draw - differences
+#     here are the randomized SVD's own truncation noise, the yardstick the
+#     report judges the fast-mode differences against (deep-spectrum PCs are
+#     expected to move under ANY perturbation; the question is whether fast
+#     mode moves them more than the estimator moves itself).
+NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_seed43" RANDOM_SEED=43 sbatch 02_run_ngspca.sh
 
 # 3. Optional: QC tables for each tree, so depth-derived phenotypes -
 #    MTDNA_CN, coverage ratios, inferred sex - are compared between modes too
@@ -353,7 +362,9 @@ bash 04_fast_mode_eval.sh
 #    generated interpretation, and the PC sets compared AS SUBSPACES
 #    (principal angles, per-PC containment, cross-correlation heatmap: rank
 #    swaps and rotations among near-degenerate PCs judged by span, which is
-#    all covariate adjustment sees); print to PDF from any browser
+#    all covariate adjustment sees). When the step-2b run exists it also
+#    renders the calibration section - fast-vs-normal against seed-vs-seed,
+#    side by side; print to PDF from any browser
 bash 04b_fast_mode_report.sh
 ```
 
@@ -365,7 +376,12 @@ cache-warming bias. Correlations are evaluated as |r|, since a singular vector's
 arbitrary. When both QC tables exist, the eval also writes `qc_concordance.tsv` and
 `fast_mode_qc.png` — per-column Pearson r plus the median relative difference, so a uniform
 bias (the signature of skipped mate-overlap correction, e.g. in `MTDNA_CN`) is visible even
-where correlation is perfect.
+where correlation is perfect. The subspace analysis lands beside them (`subspace_angles.tsv`,
+`pc_containment.tsv`, `pc_crosscorr.png`), and when the seed-control run exists its copy of
+the same analysis lands in `seed_control/` — the report reads both and states, per k, whether
+the fast-mode angles exceed the seed-to-seed ones (`SEED_CONTROL_SEED` and
+`NGSPCA_SEED_CONTROL_OUTPUT` in `config.sh` name the run; the step-2b command above matches
+their defaults).
 
 Enabling the comparison reprocesses any sample missing either tree, so every timed pair comes
 from one node and one download; a cohort already processed without it will re-download. Timing

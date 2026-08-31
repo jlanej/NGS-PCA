@@ -194,6 +194,16 @@ COMPARE_FAST_MODE="${COMPARE_FAST_MODE:-1}"
 MOSDEPTH_FAST_DIR="${MOSDEPTH_FAST_DIR:-${WORK_DIR}/mosdepth_output_fast}"
 NGSPCA_FAST_OUTPUT="${NGSPCA_FAST_OUTPUT:-${WORK_DIR}/ngspca_output_fast}"
 QC_FAST_OUTPUT="${QC_FAST_OUTPUT:-${WORK_DIR}/qc_output_fast}"
+# Seed-control calibration for the fast-mode report: the NORMAL tree
+# recomputed under a different -randomSeed. Both PCA runs of the comparison
+# share seed 42, so every fast-vs-normal difference is caused by the input
+# data - the seed control measures how big a difference the estimator makes
+# all by itself (pure truncation noise, identical data), which is the
+# yardstick that says whether fast mode's effect exceeds it. Produce it with:
+#   NGSPCA_OUTPUT="${WORK_DIR}/ngspca_output_seed43" RANDOM_SEED=43 sbatch 02_run_ngspca.sh
+# and 04b_fast_mode_report.sh picks it up from here automatically.
+SEED_CONTROL_SEED="${SEED_CONTROL_SEED:-43}"
+NGSPCA_SEED_CONTROL_OUTPUT="${NGSPCA_SEED_CONTROL_OUTPUT:-${WORK_DIR}/ngspca_output_seed${SEED_CONTROL_SEED}}"
 MOSDEPTH_TIMING_DIR="${MOSDEPTH_TIMING_DIR:-${QC_OUTPUT}/mosdepth_timing}"
 
 # ── NGS-PCA parameters ──────────────────────────────────────────────────────
