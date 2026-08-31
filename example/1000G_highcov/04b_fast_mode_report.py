@@ -216,10 +216,37 @@ def main():
                        f"genuine fast-mode effects worth inspecting; every other k sits within "
                        f"what the estimator does to itself under a reseed alone.")
         else:
-            verdict = ("At every evaluated k, the fast-vs-normal angle sits within the band the "
-                       "estimator produces against itself under a seed change alone. The "
-                       "fast-mode differences - the deep-tail behavior included - are "
-                       "indistinguishable from the randomized SVD's own truncation noise.")
+            # Two regimes, described separately: where a reseed leaves the
+            # subspace unchanged, any fast-mode angle is a real (if small)
+            # data-caused effect; where the reseed itself swings the subspace
+            # further than fast mode does, those directions are not
+            # reproducible under the estimator's own seed and no fast-mode
+            # effect is even definable there.
+            triples = [(row["k"], float(row["largest_angle_deg"]), float(s["largest_angle_deg"]))
+                       for row, s in joined]
+            tight = [(kk, fa) for kk, fa, sa in triples if sa <= 5]
+            loose = [(kk, fa, sa) for kk, fa, sa in triples if sa > fa]
+            parts = []
+            if tight:
+                parts.append(
+                    f"Where a reseed alone leaves the leading subspace essentially unchanged "
+                    f"(angle ≤ 5°: k = {', '.join(kk for kk, _ in tight)}), the fast-mode angle "
+                    f"tops out at {max(fa for _, fa in tight):.1f}° - a genuine, data-caused, "
+                    f"and small rotation.")
+            if loose:
+                kk_w, fa_w, sa_w = max(loose, key=lambda t: t[2])
+                parts.append(
+                    f"Where the spectrum runs into near-degeneracy "
+                    f"(k = {', '.join(kk for kk, _, _ in loose)}), the reseed swings the "
+                    f"subspace further than fast mode does - {sa_w:.0f}° against {fa_w:.0f}° at "
+                    f"k = {kk_w} - so the fast-mode differences there sit below the estimator's "
+                    f"own noise floor: those directions are not reproducible under the "
+                    f"estimator's seed, with or without fast mode.")
+            if not parts:
+                parts.append(
+                    "At every evaluated k, the fast-vs-normal angle sits within the band the "
+                    "estimator produces against itself under a seed change alone.")
+            verdict = " ".join(parts)
         verdict += (f" Containment tells the same story at the spectrum's edge: "
                     f"{fast_low} PCs below 0.9 containment in the fast comparison (minimum "
                     f"{fast_min:.2f}) against {seed_low} in the seed control (minimum "
