@@ -1,0 +1,13 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# FALLBACK build of the eval/report image for forks and offline sites -
+# provisioning normally pulls the CI-published :eval tag (eval.Dockerfile),
+# which needs no privileges on any node. Building this locally needs
+# `apptainer build --fakeroot`, like aspera.def and aria2.def.
+
+%post
+    pip install --no-cache-dir matplotlib==3.9.2
+
+%test
+    python3 -c "import matplotlib; print(matplotlib.__version__)"
