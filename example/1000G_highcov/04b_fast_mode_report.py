@@ -88,6 +88,18 @@ def main():
     nan_qc = [row["column"] for row in qc if row["pearson_r"].lower() == "nan"]
 
     interpretation = []
+    if len(abs_rs) > 20:
+        def tier(name, values):
+            ordered = sorted(v for _, v in values)
+            below = sum(1 for v in ordered if v < 0.99)
+            return (f"{name}: median |r| = {ordered[len(ordered) // 2]:.6f}, "
+                    f"min = {ordered[0]:.6f}, {below} below 0.99")
+        interpretation.append(
+            f"Stability by depth - {tier('PC1-PC20', abs_rs[:20])}; "
+            f"{tier('PC21-PC' + abs_rs[-1][0], abs_rs[20:])}. Later components carry less "
+            f"variance and rotate more easily among near-equal singular values, so a slow "
+            f"decline in |r| down the spectrum is expected rather than alarming - what would "
+            f"matter is an early component breaking from it.")
     if weak:
         notes = ", ".join(
             f"PC{row['PC']} (|r| = {fmt(row['abs_r'])}, singular-value ratio "

@@ -973,6 +973,14 @@ jobs:
           fi
           echo "PASS: missing input exits non-zero"
 
+          # with no --pcs, every PC both runs computed must be evaluated
+          python3 04_fast_mode_eval.py --normal "$F/normal" --fast "$F/fast" \
+            --out "$F/out_all" > /dev/null
+          ALLROWS=$(tail -n +2 "$F/out_all/pc_correlation.tsv" | wc -l)
+          [ "$ALLROWS" -eq 6 ] \
+            || { echo "::error::default should evaluate all 6 PCs, got $ALLROWS"; exit 1; }
+          echo "PASS: default evaluates every computed PC"
+
       - name: Run again with matplotlib and check the figure
         working-directory: example/1000G_highcov
         run: |

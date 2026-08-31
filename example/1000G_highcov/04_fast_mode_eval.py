@@ -159,7 +159,8 @@ def main():
     parser.add_argument("--qc-normal", default=None, help="sample_qc.tsv from the standard tree")
     parser.add_argument("--qc-fast", default=None, help="sample_qc.tsv from the fast tree")
     parser.add_argument("--out", required=True, help="directory to write the evaluation into")
-    parser.add_argument("--pcs", type=int, default=20, help="leading PCs to evaluate (default 20)")
+    parser.add_argument("--pcs", type=int, default=0,
+                        help="leading PCs to evaluate (default 0 = every PC both runs computed)")
     args = parser.parse_args()
 
     for side, directory in (("normal", args.normal), ("fast", args.fast)):
@@ -187,7 +188,7 @@ def main():
         warnings.append("svd.bins.txt differs between the runs - the two PCAs did not use the same "
                         "bins, so PC correlations conflate fast mode with bin selection")
 
-    k = min(args.pcs, normal_n, fast_n)
+    k = min(args.pcs, normal_n, fast_n) if args.pcs > 0 else min(normal_n, fast_n)
     sv_normal = read_singular_values(os.path.join(args.normal, "svd.singularvalues.txt"))
     sv_fast = read_singular_values(os.path.join(args.fast, "svd.singularvalues.txt"))
 
