@@ -118,12 +118,12 @@ parse_mosdepth_summary() {
 # The mosdepth .global.dist.txt file records the cumulative coverage
 # distribution for the whole genome.  Format (tab-separated):
 #   chrom/total   depth   fraction_at_>=_depth
-# Example:
-#   total   0   1.00
-#   total   1   0.99
-#   ...
+# mosdepth writes rows depth-DESCENDING, ending at depth 0 with fraction 1.0,
+# so the median must be the GREATEST depth still covering >= 50% of bases -
+# tracking the last qualifying row would always land on that final depth-0
+# line and report a median of 0 for every sample.
 # From this we derive:
-#   - MEDIAN_GENOME_COV: depth at which cumulative fraction crosses 0.50
+#   - MEDIAN_GENOME_COV: greatest depth with cumulative fraction >= 0.50
 #   - PCT_GENOME_COV_10X: fraction of genome at >= 10× depth
 #   - PCT_GENOME_COV_20X: fraction of genome at >= 20× depth
 # Output: 3 tab-separated fields
@@ -135,7 +135,7 @@ parse_mosdepth_global_dist() {
       frac  = $3 + 0
       if (depth == 10) pct10x = sprintf("%.4f", frac * 100)
       if (depth == 20) pct20x = sprintf("%.4f", frac * 100)
-      if (frac >= 0.5) last_depth_above_half = depth
+      if (frac >= 0.5 && depth > last_depth_above_half) last_depth_above_half = depth
     }
     END {
       if (last_depth_above_half >= 0) median = last_depth_above_half

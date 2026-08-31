@@ -253,11 +253,13 @@ jobs:
           printf "chrY\t57227415\t286137075\t5.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
           printf "chrM\t16569\t828450\t50.00\t0\t100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.summary.txt"
 
-          printf "total\t0\t1.0000\n" > "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
-          printf "total\t10\t0.9500\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
-          printf "total\t20\t0.9000\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          # depth-descending and ending at "0  1.0", as real mosdepth writes it -
+          # the ascending fixture this replaces let a last-row median bug pass
+          printf "total\t31\t0.4900\n" > "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
           printf "total\t30\t0.5100\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
-          printf "total\t31\t0.4900\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t20\t0.9000\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t10\t0.9500\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
+          printf "total\t0\t1.0000\n" >> "${TEST_WORK}/mosdepth_output/testSample.by1000.mosdepth.global.dist.txt"
 
           # ── Create synthetic coverage summary ──
           printf "SAMPLE_ID\tMEAN_COV\tMEDIAN_COV\tSD_COV\tMAD_COV\tIQR_COV\tHQ_MEAN_COV\tHQ_MEDIAN_COV\tHQ_SD_COV\tHQ_MAD_COV\tHQ_IQR_COV\n" > "${TEST_WORK}/qc_output/mosdepth_coverage_summary.tsv"
