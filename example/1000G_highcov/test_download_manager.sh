@@ -49,7 +49,9 @@ EOF
 cat > "${T}/bin/aria2c" <<'EOF'
 #!/usr/bin/env bash
 # fails unless FAKE_S3 is set and holds the requested basename; the URL is the
-# last argument and --dir/--out name the destination, like the real thing
+# last argument and --dir/--out name the destination, like the real thing.
+# With FAKE_ENA set, ENA URLs are served from that store instead, so the two
+# sources can disagree about a file.
 [[ -n "${FAKE_S3:-}" ]] || exit 1
 dir=""; out=""; url=""
 while [[ $# -gt 0 ]]; do
@@ -60,7 +62,9 @@ while [[ $# -gt 0 ]]; do
     *) url="$1"; shift ;;
   esac
 done
-src="${FAKE_S3}/$(basename "${url}")"
+store="${FAKE_S3}"
+[[ -n "${FAKE_ENA:-}" && "${url}" == *"ftp.sra.ebi.ac.uk"* ]] && store="${FAKE_ENA}"
+src="${store}/$(basename "${url}")"
 [[ -f "${src}" ]] || exit 1
 cp "${src}" "${dir}/${out}"
 EOF
@@ -295,6 +299,59 @@ grep -q "aria2c download complete (S3," "${T}/work5/logs/download_X1.log" \
 check "S3-served sample reached both trees" test -s "${T}/work5/mosdepth_output/X1.by1000.regions.bed.gz" \
   -a -s "${T}/work5/mosdepth_output_fast/X1.by1000.regions.bed.gz"
 echo "PASS: S3 mirror preferred and served end to end"
+
+echo "=== S3 mirror: a 0-byte index falls through to ENA, and is not 'already present' ==="
+# The mirror serves two real CRAIs (HG00619, HG00620) as HTTP 200 with
+# Content-Length 0, and aria2c calls that a success. E1 meets it fresh. E2 is
+# what those sweeps left behind - a verified CRAM beside the 0-byte CRAI, which
+# every resweep accepted as present and dispatched to a mosdepth job that
+# could only die on it. E2's CRAM is in no store: re-downloading it fails loudly.
+mkdir -p "${T}/work6/crams" "${T}/s3empty" "${T}/enastore"
+python3 - "${T}" <<'EOF'
+import hashlib, sys
+T = sys.argv[1]
+rows = []
+for sample in ("E1", "E2"):
+    content = f"{sample}-bytes".encode() * 120
+    if sample == "E1":
+        open(f"{T}/s3empty/{sample}.final.cram", "wb").write(content)
+    else:
+        open(f"{T}/work6/crams/{sample}.cram", "wb").write(content)
+        open(f"{T}/work6/crams/{sample}.cram.crai", "wb").close()
+    open(f"{T}/s3empty/{sample}.final.cram.crai", "wb").close()
+    open(f"{T}/enastore/{sample}.final.cram.crai", "wb").write(b"crai-" + sample.encode())
+    base = f"ftp://ftp.sra.ebi.ac.uk/vol1/run/ERRE/ERR{sample}/{sample}.final.cram"
+    rows.append(f"{sample}\t{base}\t{base}.crai\t{hashlib.md5(content).hexdigest()}\t2504")
+with open(f"{T}/work6/manifest.tsv", "w") as out:
+    out.write("SAMPLE\tCRAM\tCRAI\tMD5\tRELEASE_BATCH\n")
+    out.write("\n".join(rows) + "\n")
+EOF
+WORK_DIR="${T}/work6" \
+SIF_IMAGE="${T}/work/ngs-pca.sif" \
+REF_DIR="${T}/work/reference" \
+REF_FASTA="${T}/work/reference/ref.fa" \
+MANIFEST="${T}/work6/manifest.tsv" \
+MIN_MANIFEST_SAMPLES=1 EXPECTED_MANIFEST_SAMPLES=2 \
+USE_ASPERA=0 COMPARE_FAST_MODE=1 DOWNLOADER_LOCAL=1 DOWNLOAD_SLOTS=2 \
+FAKE_S3="${T}/s3empty" FAKE_ENA="${T}/enastore" FAKE_REMOTE="${T}/remote" \
+bash "${HERE}/01_download_and_mosdepth.sh" > "${T}/s3empty.log" 2>&1 \
+  || { echo "FAIL: sweep over the empty S3 indexes should succeed"; cat "${T}/s3empty.log" "${T}/work6/logs/"download_E?.log 2>/dev/null; exit 1; }
+grep -q "CRAM: aria2c download complete (S3," "${T}/work6/logs/download_E1.log" \
+  || { echo "FAIL: the mirror should still serve E1's CRAM"; cat "${T}/work6/logs/download_E1.log"; exit 1; }
+grep -q "CRAI: aria2c download complete (ENA," "${T}/work6/logs/download_E1.log" \
+  || { echo "FAIL: E1's 0-byte S3 CRAI should have fallen through to ENA"; cat "${T}/work6/logs/download_E1.log"; exit 1; }
+echo "PASS: an empty S3 object is a failed transport - E1's CRAM from S3, its CRAI from ENA"
+grep -q "CRAM already present" "${T}/work6/logs/download_E2.log" \
+  || { echo "FAIL: E2's staged CRAM should skip the download"; cat "${T}/work6/logs/download_E2.log"; exit 1; }
+grep -q "CRAI already present" "${T}/work6/logs/download_E2.log" \
+  && { echo "FAIL: a 0-byte CRAI on disk must not count as present"; cat "${T}/work6/logs/download_E2.log"; exit 1; }
+grep -q "CRAI: aria2c download complete (ENA," "${T}/work6/logs/download_E2.log" \
+  || { echo "FAIL: E2's CRAI should have been fetched from ENA"; cat "${T}/work6/logs/download_E2.log"; exit 1; }
+echo "PASS: a 0-byte CRAI left on disk is fetched again, beside the CRAM it kept"
+for s in E1 E2; do
+  check "${s} reached both trees" test -s "${T}/work6/mosdepth_output/${s}.by1000.regions.bed.gz" \
+    -a -s "${T}/work6/mosdepth_output_fast/${s}.by1000.regions.bed.gz"
+done
 
 echo "=== aria2c resolution: host, bespoke image, neither ==="
 sed -n '/^resolve_aria2c()/,/^}/p' "${HERE}/01_download_and_mosdepth.sh" > "${T}/a2fn.sh"

@@ -297,6 +297,16 @@ download_aria2() {
     return 1
   fi
   rm -f "${dest}.aria2"
+  # aria2c exits 0 on a 0-byte object, and the S3 mirror serves two CRAIs that
+  # way (HTTP 200, Content-Length 0) while ENA's copies are whole. Nothing
+  # fetched here is legitimately empty, so an empty result is a failed
+  # transport and the caller moves on to the next source - the curl path's
+  # total > 0 check already behaves this way.
+  if [[ ! -s "${dest}" ]]; then
+    echo "  WARNING: aria2c returned an empty file for ${url}; treating the transfer as failed."
+    rm -f "${dest}"
+    return 1
+  fi
 }
 
 # Parallel byte-range download using only curl, for hosts without aria2c.
@@ -422,7 +432,11 @@ download_sample() {
   # downloaded once more before the sample is given up on.
   local download_attempt actual_md5
   for download_attempt in 1 2; do
-    if [[ ! -f "${local_cram}" ]]; then
+    # "Already present" means non-empty (-s), the test 01b and the stage
+    # watcher apply. An empty CRAM would at least fail a manifest MD5; the
+    # CRAI has no checksum, so a 0-byte index accepted here goes to a mosdepth
+    # job that can only die on it - on this sweep and every resweep after.
+    if [[ ! -s "${local_cram}" ]]; then
       echo "[1/2] Downloading CRAM..."
       if ! download_file "${cram_url}" "${local_cram}" "CRAM" "${batch}"; then
         return 1
@@ -431,7 +445,7 @@ download_sample() {
       echo "[1/2] CRAM already present: ${local_cram}"
     fi
 
-    if [[ ! -f "${local_crai}" ]]; then
+    if [[ ! -s "${local_crai}" ]]; then
       echo "  Downloading CRAI..."
       if ! download_file "${crai_url}" "${local_crai}" "CRAI" "${batch}"; then
         rm -f "${local_cram}"

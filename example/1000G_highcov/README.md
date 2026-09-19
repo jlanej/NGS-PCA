@@ -604,6 +604,11 @@ HTTPS with range support and free egress. Nothing at EBI — shared DTNs, FASP c
 throttling — is in the path, and S3 read throughput is effectively unbounded from a
 well-connected site.
 
+Two index files are the known exception: the mirror's `HG00619.final.cram.crai` and
+`HG00620.final.cram.crai` are 0-byte objects (HTTP 200, `Content-Length: 0`; ENA's are whole;
+checked 2026-09-19), so the manager counts an empty download as a failed transport and takes
+those two from ENA.
+
 The manager's HTTPS transports (aria2c, parallel curl) try this mirror **before** ENA
 automatically; the transport census in the download logs shows which source served each file
 (`aria2c download complete (S3, ...)`). Set `S3_HTTPS_BASE=""` to disable it. When the mirror is
